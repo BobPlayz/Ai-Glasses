@@ -12,11 +12,24 @@ if (-not $py) { throw "Python launcher 'py' not found. Install Python 3.11 and e
 & py -3.11 --version
 if ($LASTEXITCODE -ne 0) { throw "Python 3.11 not found. Install Python 3.11 before continuing." }
 
-if (-not (Test-Path (Join-Path $PSScriptRoot ".venv\Scripts\python.exe"))) {
+# Reuse only a virtual environment that actually runs Python 3.11.
+$venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+$venvValid = $false
+if (Test-Path $venvPython) {
+    & $venvPython -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 2)"
+    $venvValid = ($LASTEXITCODE -eq 0)
+}
+if (-not $venvValid) {
+    if (Test-Path (Join-Path $PSScriptRoot ".venv")) {
+        Write-Host "Replacing the project-local .venv because it is missing or not Python 3.11. Project source and personal files are untouched." -ForegroundColor Yellow
+        Remove-Item -Recurse -Force (Join-Path $PSScriptRoot ".venv")
+    }
     & py -3.11 -m venv .venv
-    if ($LASTEXITCODE -ne 0) { throw "Could not create the Python virtual environment." }
+    if ($LASTEXITCODE -ne 0) { throw "Could not create the Python 3.11 virtual environment." }
 }
 $venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+& $venvPython -c "import sys; print('Using Python', sys.version); raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 2)"
+if ($LASTEXITCODE -ne 0) { throw "The project virtual environment must use Python 3.11." }
 & $venvPython -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed." }
 & $venvPython -m pip install -r requirements.txt
@@ -73,11 +86,17 @@ $voiceFiles = @(
 )
 foreach ($voiceFile in $voiceFiles) {
     $destination = Join-Path $ttsDir $voiceFile.Name
-    if (-not (Test-Path $destination)) {
-        Invoke-WebRequest -Uri $voiceFile.Url -OutFile $destination -UseBasicParsing
-        if ($LASTEXITCODE -ne 0) { throw "Voice download failed: $($voiceFile.Name)" }
+    if ((-not (Test-Path $destination)) -or (Get-Item $destination).Length -lt 1000) {
+        $partial = "$destination.download"
+        Remove-Item $partial -Force -ErrorAction SilentlyContinue
+        Invoke-WebRequest -Uri $voiceFile.Url -OutFile $partial -UseBasicParsing -ErrorAction Stop
+        if (-not (Test-Path $partial) -or (Get-Item $partial).Length -lt 1000) {
+            Remove-Item $partial -Force -ErrorAction SilentlyContinue
+            throw "Voice download is incomplete: $($voiceFile.Name). Fix the connection and rerun setup."
+        }
+        Move-Item -Force $partial $destination
     }
-    if ((Get-Item $destination).Length -lt 1000) { throw "Voice file looks incomplete: $($voiceFile.Name). Delete it and rerun setup." }
+    if ((Get-Item $destination).Length -lt 1000) { throw "Voice file looks incomplete: $($voiceFile.Name)." }
 }
 
 Write-Host "Caching local text models..." -ForegroundColor Cyan
@@ -103,8 +122,15 @@ $tessdataDir = Join-Path $PSScriptRoot "models\tesseract\tessdata"
 New-Item -ItemType Directory -Force -Path $tessdataDir | Out-Null
 foreach ($lang in @("eng", "tel")) {
     $langPath = Join-Path $tessdataDir ($lang + ".traineddata")
-    if (-not (Test-Path $langPath)) {
-        Invoke-WebRequest -Uri ("https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/" + $lang + ".traineddata") -OutFile $langPath -UseBasicParsing
+    if ((-not (Test-Path $langPath)) -or (Get-Item $langPath).Length -lt 100000) {
+        $partial = "$langPath.download"
+        Remove-Item $partial -Force -ErrorAction SilentlyContinue
+        Invoke-WebRequest -Uri ("https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/" + $lang + ".traineddata") -OutFile $partial -UseBasicParsing -ErrorAction Stop
+        if (-not (Test-Path $partial) -or (Get-Item $partial).Length -lt 100000) {
+            Remove-Item $partial -Force -ErrorAction SilentlyContinue
+            throw "OCR language model $lang download is incomplete."
+        }
+        Move-Item -Force $partial $langPath
     }
     if ((Get-Item $langPath).Length -lt 100000) { throw "OCR language model $lang looks incomplete." }
 }
