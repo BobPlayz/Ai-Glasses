@@ -31,7 +31,9 @@ if (-not (Test-Path $pinPath)) {
 $deviceTokenPath = Join-Path $PSScriptRoot ".device-token"
 if (-not (Test-Path $deviceTokenPath)) {
     $bytes = New-Object byte[] 32
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+    $rng.GetBytes($bytes)
+    $rng.Dispose()
     $token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
     Set-Content -Path $deviceTokenPath -Value $token -NoNewline
     Write-Host "Created local device pairing token in .device-token. Copy it only into your private firmware secrets file." -ForegroundColor Yellow
