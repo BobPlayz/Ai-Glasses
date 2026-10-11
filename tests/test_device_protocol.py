@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from laptop.app import app, DEVICE_TOKEN_PATH, PIN_PATH
+from laptop.app import app, DEVICE_TOKEN_PATH, PIN_PATH, normalize_speech
 
 
 class DeviceProtocolTests(unittest.TestCase):
@@ -23,6 +23,10 @@ class DeviceProtocolTests(unittest.TestCase):
             PIN_PATH.unlink(missing_ok=True)
         else:
             PIN_PATH.write_text(self.old_pin)
+
+    def test_unicode_wake_phrase_normalization(self):
+        self.assertEqual(normalize_speech("Hey, glasses!"), "hey  glasses")
+        self.assertEqual(normalize_speech("హే గ్లాసెస్"), "హే గ్లాసెస్")
 
     def test_device_token_required(self):
         response = self.client.get("/api/device/command")
