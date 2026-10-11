@@ -34,6 +34,16 @@ if (-not $ollama) {
     }
 }
 
+Write-Host ""
+$cacheWhisper = Read-Host "Download/cache the multilingual Whisper base speech model now? This requires internet and about 150 MB (Y/N)"
+if ($cacheWhisper -match "^[Yy]$") {
+    $env:GLASSES_MODEL_CACHE = Join-Path $PSScriptRoot "models\whisper"
+    & $venvPython -c "from faster_whisper import WhisperModel; import os; WhisperModel('base', device='cpu', compute_type='int8', download_root=os.environ['GLASSES_MODEL_CACHE'])"
+    if ($LASTEXITCODE -ne 0) { throw "Whisper model cache failed. Check internet access and rerun setup." }
+} else {
+    Write-Host "Whisper model cache skipped. Offline speech recognition will not work until cached." -ForegroundColor Yellow
+}
+
 if ($ollama) {
     Write-Host "Model downloads happen now, not during questions." -ForegroundColor Cyan
     $pull = Read-Host "Download qwen2.5:1.5b and qwen2.5:0.5b? Several GB may be downloaded (Y/N)"
