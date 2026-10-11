@@ -15,3 +15,7 @@ captures/
 .idea/
 .DS_Store
 Thumbs.db
+
+.dashboard-pin
+.device-token
+firmware/**/secrets.h
