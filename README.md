@@ -5,6 +5,7 @@ A local-first smart-glasses prototype for a school exhibition. The Windows lapto
 ## Included in this repository
 
 - Futuristic dark/cyan local dashboard
+- Connections hub for glasses Wi-Fi link status, camera/microphone permission toggles, laptop microphone connect/disconnect, and local speaker test
 - Local Ollama text assistant with primary and fallback models
 - SQLite useful-fact memory and opt-in short conversation summaries
 - Offline multilingual Whisper transcription adapter and cached-model setup
