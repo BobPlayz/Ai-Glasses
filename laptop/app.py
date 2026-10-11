@@ -15,6 +15,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from laptop.assistant.ollama_client import OllamaError, ask_local, service_status
 from laptop.memory.store import search_memories
@@ -268,7 +269,7 @@ async def transcribe_audio(file: UploadFile = File(...)) -> dict:
     path = TEMP_DIR / f"{uuid4().hex}{suffix}"
     try:
         path.write_bytes(raw)
-        result = transcribe_audio_file(path)
+        result = await run_in_threadpool(transcribe_audio_file, path)
         return result
     except SpeechError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -309,7 +310,7 @@ async def vision(question: str = "Describe the main objects and read visible tex
     if len(raw) > 8 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Image exceeds the 8 MB limit.")
     try:
-        result = ask_image_local(raw, question)
+        result = await run_in_threadpool(ask_image_local, raw, question)
         return result
     except VisionError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -330,7 +331,7 @@ async def device_audio(request: Request) -> dict:
     path = TEMP_DIR / f"mic-{uuid4().hex}.wav"
     try:
         path.write_bytes(raw)
-        result = transcribe_audio_file(path, model_size="base")
+        result = await run_in_threadpool(transcribe_audio_file, path, "base")
     except SpeechError as exc:
         _voice_last_event = {"state": "speech_unavailable", "detail": str(exc)}
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -364,12 +365,12 @@ async def device_audio(request: Request) -> dict:
     question = transcript.strip()
     memories = search_memories(DB_PATH, question)
     try:
-        reply = ask_local(question, memories)
+        reply = await run_in_threadpool(ask_local, question, memories)
     except OllamaError as exc:
         _voice_last_event = {"state": "error", "detail": str(exc)}
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     save_conversation(question, reply.text, reply.model, False)
-    speech = speak_local(reply.text[:700])
+    speech = await run_in_threadpool(speak_local, reply.text[:700])
     _voice_last_event = {"state": "answered", "detail": f"Answered using {reply.model}."}
     return {
         "state": "answered",
@@ -447,7 +448,7 @@ async def request_device_capture(payload: CaptureRequest) -> dict:
             _last_frame = None
             _capture_request = None
             try:
-                result = ask_image_local(frame, payload.question)
+                result = await run_in_threadpool(ask_image_local, frame, payload.question)
                 return {"request_id": request_id, **result}
             except VisionError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
