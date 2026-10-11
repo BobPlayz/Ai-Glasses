@@ -40,6 +40,7 @@ _capture_request: dict | None = None
 _last_device_status: dict = {"connected": False}
 _last_frame: dict | None = None
 _dashboard_camera_enabled = False
+_dashboard_microphone_enabled = False  # Explicit opt-in; device mic uploads are blocked by default.
 _voice_armed = False
 _voice_question_parts: list[str] = []
 _voice_last_event: dict = {"state": "idle", "detail": "No device audio received yet."}
@@ -121,6 +122,10 @@ class WakePhraseInput(BaseModel):
 
 
 class CameraControlInput(BaseModel):
+    enabled: bool
+
+
+class MicrophoneControlInput(BaseModel):
     enabled: bool
 
 
@@ -225,7 +230,8 @@ def status() -> dict:
         "glasses_device": "connected" if device_fresh else "not connected",
         "camera": "capture allowed" if _dashboard_camera_enabled and device_fresh and _last_device_status.get("camera_enabled") and _last_device_status.get("privacy_switch_enabled") else "capture disabled / unverified",
         "dashboard_camera_enabled": _dashboard_camera_enabled,
-        "microphone": "streaming local audio" if _last_device_status.get("microphone_ready") and time.time() - _last_device_status.get("updated_at", 0) < 8 else "not connected",
+        "microphone": ("enabled; local audio processing" if _dashboard_microphone_enabled else "disabled by dashboard") if _last_device_status.get("microphone_ready") and device_fresh else "not connected / unverified",
+        "dashboard_microphone_enabled": _dashboard_microphone_enabled,
         "wake_phrase": current_wake_phrase(),
         "voice_state": _voice_last_event.get("state", "idle"),
         "voice_question": _voice_last_event.get("question", ""),
@@ -385,6 +391,8 @@ async def vision(question: str = "Describe the main objects and read visible tex
 @app.post("/api/device/audio", dependencies=[Depends(verify_device_token)])
 async def device_audio(request: Request) -> dict:
     global _voice_armed, _voice_last_event
+    if not _dashboard_microphone_enabled:
+        raise HTTPException(status_code=403, detail="Device microphone is disabled in the dashboard.")
     raw = await request.body()
     if not raw:
         raise HTTPException(status_code=400, detail="Audio chunk is empty.")
@@ -503,6 +511,19 @@ def camera_control(payload: CameraControlInput) -> dict:
     return {"dashboard_camera_enabled": _dashboard_camera_enabled}
 
 
+@app.post("/api/microphone/control", dependencies=[Depends(verify_dashboard_pin)])
+def microphone_control(payload: MicrophoneControlInput) -> dict:
+    global _dashboard_microphone_enabled, _voice_armed, _voice_question_parts, _voice_last_event
+    _dashboard_microphone_enabled = payload.enabled
+    if not _dashboard_microphone_enabled:
+        _voice_armed = False
+        _voice_question_parts = []
+        _voice_last_event = {"state": "disabled", "detail": "Device microphone disabled in dashboard."}
+    else:
+        _voice_last_event = {"state": "listening", "detail": "Device microphone enabled. Audio is sent to this laptop for local processing."}
+    return {"dashboard_microphone_enabled": _dashboard_microphone_enabled}
+
+
 @app.post("/api/device/status", dependencies=[Depends(verify_device_token)])
 def device_status(payload: DeviceStatusInput) -> dict:
     global _last_device_status, _last_indicator_on_at
@@ -519,7 +540,7 @@ def device_command() -> dict:
     global _capture_request
     if _capture_request and _capture_request.get("expires_at", 0) < time.time():
         _capture_request = None
-    return {"capture": _capture_request or None, "camera_allowed": _dashboard_camera_enabled}
+    return {"capture": _capture_request or None, "camera_allowed": _dashboard_camera_enabled, "microphone_allowed": _dashboard_microphone_enabled}
 
 
 @app.post("/api/device/capture-result", dependencies=[Depends(verify_device_token)])
@@ -628,12 +649,12 @@ button,input,textarea{font:inherit;letter-spacing:inherit}button{cursor:pointer;
 <section class="extras">
 <div class="panel"><h2>Visual systems</h2><p class="tiny">Image uploads are analyzed locally. Glasses capture needs explicit request, dashboard permission, and the physical privacy switch.</p><label for="visionQuestion">Visual question</label><textarea id="visionQuestion" placeholder="What am I looking at?"></textarea><label for="imageFile">Choose image</label><input id="imageFile" type="file" accept="image/jpeg,image/png,image/webp,image/bmp"><button onclick="askUploadedImage()">Analyze image</button><button onclick="askGlasses()">Capture from glasses</button><div id="visionAnswer" class="out"></div></div>
 <div class="panel"><h2>Voice & wake phrase</h2><label for="wakePhrase">Wake phrase</label><input id="wakePhrase" maxlength="80" placeholder="hey glasses"><button onclick="saveWakePhrase()">Save phrase</button><div id="wakeStatus" class="tiny" style="margin-top:8px">Loading local setting...</div><label for="speakText">Speak text</label><textarea id="speakText" placeholder="Type a short phrase to test the voice..."></textarea><button onclick="speakText()">Speak offline</button><label for="audioFile">Transcribe audio file</label><input id="audioFile" type="file" accept="audio/*"><button onclick="transcribe()">Transcribe file locally</button><div style="margin-top:10px"><button id="recordButton" onclick="startMicTest()">Record laptop mic</button><button id="stopRecordButton" onclick="stopMicTest()" disabled>Stop & transcribe</button><span id="micTestState" class="tiny">Browser mic simulator: ready</span></div><div class="tiny">Laptop-only microphone test. Audio is sent to this laptop for local transcription and temporary files are deleted.</div><div id="speechAnswer" class="out"></div></div>
-<div class="panel"><h2>Memory & privacy</h2><label for="memory">Save local memory</label><textarea id="memory" placeholder="A useful fact to remember..."></textarea><button onclick="saveMemory()">Save memory</button><button onclick="loadMemories()">Refresh</button><button onclick="clearMemory()">Clear all</button><div id="memories" class="out"></div><hr style="border:0;border-top:1px solid #16404d;margin:14px 0"><div class="tiny">Dashboard camera: <b id="cameraControlState">disabled</b></div><div class="tiny">Physical indicator: <b id="indicatorState">unverified</b></div><button id="cameraControlButton" onclick="toggleCameraControl()">Enable camera control</button><div id="privacyBadge" class="privacy tiny" style="margin-top:9px">CAMERA OFF / UNVERIFIED</div></div>
+<div class="panel"><h2>Memory & privacy</h2><label for="memory">Save local memory</label><textarea id="memory" placeholder="A useful fact to remember..."></textarea><button onclick="saveMemory()">Save memory</button><button onclick="loadMemories()">Refresh</button><button onclick="clearMemory()">Clear all</button><div id="memories" class="out"></div><hr style="border:0;border-top:1px solid #16404d;margin:14px 0"><div class="tiny">Dashboard camera: <b id="cameraControlState">disabled</b></div><div class="tiny">Device microphone: <b id="microphoneControlState">disabled</b></div><button id="microphoneControlButton" onclick="toggleMicrophoneControl()">Enable device microphone</button><div class="tiny">Microphone uploads are blocked until you explicitly enable them here. Audio is processed locally on this laptop.</div><div class="tiny">Physical indicator: <b id="indicatorState">unverified</b></div><button id="cameraControlButton" onclick="toggleCameraControl()">Enable camera control</button><div id="privacyBadge" class="privacy tiny" style="margin-top:9px">CAMERA OFF / UNVERIFIED</div></div>
 </section><div class="tiny" style="text-align:center;margin-top:14px">LOCAL-FIRST · NO CLOUD AI · CAMERA CAPTURE IS EXPLICITLY GATED</div>
 </main>
 <div class="commandbar"><span class="prompt">›</span><input id="command" placeholder="Type a question, then press Enter..." autocomplete="off"><button id="sendButton" onclick="sendCommand()">Send ↵</button><button onclick="speakAnswer()">Speak</button></div>
 <script>
-let dashboardPin=sessionStorage.getItem('glasses-pin')||'',latestAnswer='',cameraEnabled=false,aiBusy=false;
+let dashboardPin=sessionStorage.getItem('glasses-pin')||'',latestAnswer='',cameraEnabled=false,microphoneEnabled=false,aiBusy=false;
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function logActivity(message){const el=document.getElementById('activity'),p=document.createElement('p');p.className='logline';p.innerHTML='<span class="logtime">'+esc(new Date().toLocaleTimeString())+'</span> <span class="gold">$</span> '+esc(message);el.appendChild(p);while(el.children.length>45)el.removeChild(el.firstChild);el.scrollTop=el.scrollHeight}
 async function api(url,options){options=options||{};let headers=Object.assign({'X-Dashboard-Pin':dashboardPin},options.headers||{});if(!(options.body instanceof FormData)&&!headers['Content-Type'])headers['Content-Type']='application/json';options.headers=headers;let r=await fetch(url,options),d;try{d=await r.json()}catch{d={detail:'Unexpected server response'}}if(r.status===401){document.getElementById('pinPanel').style.display='block';throw new Error('Dashboard PIN required. Enter it above.')}if(!r.ok)throw new Error(d.detail||'Request failed');return d}
@@ -642,7 +663,7 @@ function setTranscript(q,a,meta){document.getElementById('transcriptText').textC
 async function sendCommand(){let box=document.getElementById('command'),content=box.value.trim();if(!content||aiBusy)return;box.value='';aiBusy=true;document.getElementById('aiVal').textContent='BUSY';document.getElementById('aiBar').style.width='85%';document.getElementById('onlineState').textContent='THINKING';document.getElementById('sendButton').disabled=true;setTranscript(content,'Thinking locally...','LOCAL INFERENCE');logActivity('Question received: '+content.slice(0,90));try{let d=await api('/api/ask',{method:'POST',body:JSON.stringify({content,remember_summary:false})});latestAnswer=d.answer;setTranscript(content,d.answer,'MODEL '+d.model+(d.used_fallback?' · FALLBACK':'')+' · '+d.memory_notes_used+' MEMORY NOTES');document.getElementById('modelCaption').textContent='LOCAL AI · '+d.model;document.getElementById('onlineState').textContent='ONLINE';logActivity('Response ready using '+d.model);if(d.used_fallback)logActivity('Smaller fallback model used.')}catch(e){setTranscript(content,e.message,'REQUEST FAILED');document.getElementById('onlineState').textContent='CHECK SYSTEM';logActivity('Error: '+e.message)}finally{aiBusy=false;document.getElementById('aiVal').textContent='IDLE';document.getElementById('aiBar').style.width='12%';document.getElementById('sendButton').disabled=false}}
 document.getElementById('command').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendCommand()}});
 function tickClock(){let d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString('en-GB',{hour12:false});document.getElementById('dateLine').textContent=d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}).toUpperCase()}
-async function loadStatus(){try{let s=await api('/api/status');document.getElementById('onlineState').textContent='ONLINE';document.getElementById('serviceLine').textContent=s.language_model;document.getElementById('modelCaption').textContent='LOCAL AI · '+s.language_model;cameraEnabled=Boolean(s.dashboard_camera_enabled);document.getElementById('cameraControlState').textContent=cameraEnabled?'enabled':'disabled';document.getElementById('cameraControlButton').textContent=cameraEnabled?'Disable camera control':'Enable camera control';document.getElementById('indicatorState').textContent=s.privacy_indicator;let good=String(s.camera).includes('capture allowed')&&s.privacy_indicator==='on';document.getElementById('privacyBadge').textContent=good?'CAMERA CAPTURE ACTIVE':'CAMERA OFF / UNVERIFIED';document.getElementById('privacyBadge').style.color=good?'var(--green)':'var(--gold)';document.getElementById('inboxText').innerHTML='NOT CONNECTED<br>Optional Gmail integration not configured.';logOnce('status','Local services checked. Camera '+(good?'active':'off or unverified')+'.')}catch(e){document.getElementById('onlineState').textContent='LOCAL ONLY';document.getElementById('serviceLine').textContent=e.message;logOnce('status-error','Status check: '+e.message)}}
+async function loadStatus(){try{let s=await api('/api/status');document.getElementById('onlineState').textContent='ONLINE';document.getElementById('serviceLine').textContent=s.language_model;document.getElementById('modelCaption').textContent='LOCAL AI · '+s.language_model;cameraEnabled=Boolean(s.dashboard_camera_enabled);microphoneEnabled=Boolean(s.dashboard_microphone_enabled);document.getElementById('cameraControlState').textContent=cameraEnabled?'enabled':'disabled';document.getElementById('microphoneControlState').textContent=microphoneEnabled?'enabled':'disabled';document.getElementById('microphoneControlButton').textContent=microphoneEnabled?'Disable device microphone':'Enable device microphone';document.getElementById('cameraControlButton').textContent=cameraEnabled?'Disable camera control':'Enable camera control';document.getElementById('indicatorState').textContent=s.privacy_indicator;let good=String(s.camera).includes('capture allowed')&&s.privacy_indicator==='on';document.getElementById('privacyBadge').textContent=good?'CAMERA CAPTURE ACTIVE':'CAMERA OFF / UNVERIFIED';document.getElementById('privacyBadge').style.color=good?'var(--green)':'var(--gold)';document.getElementById('inboxText').innerHTML='NOT CONNECTED<br>Optional Gmail integration not configured.';logOnce('status','Local services checked. Camera '+(good?'active':'off or unverified')+'.')}catch(e){document.getElementById('onlineState').textContent='LOCAL ONLY';document.getElementById('serviceLine').textContent=e.message;logOnce('status-error','Status check: '+e.message)}}
 const seen=new Set();function logOnce(k,m){if(seen.has(k))return;seen.add(k);logActivity(m)}
 async function speakText(){let content=document.getElementById('speakText').value.trim();if(!content)return;latestAnswer=content;try{let d=await api('/api/speech/speak',{method:'POST',body:JSON.stringify({content})});document.getElementById('speechAnswer').textContent=d.spoken?'Spoken using '+(d.engine||'local speech')+(d.voice?' · '+d.voice:'')+'.':(d.message||d.reason||'Speech unavailable.');logActivity('Offline speech test requested.')}catch(e){document.getElementById('speechAnswer').textContent=e.message}}
 async function speakAnswer(){if(!latestAnswer){logActivity('No answer available to speak.');return}document.getElementById('speakText').value=latestAnswer;await speakText()}
@@ -655,6 +676,7 @@ async function transcribe(){let file=document.getElementById('audioFile').files[
 async function askUploadedImage(){let file=document.getElementById('imageFile').files[0];if(!file){alert('Choose an image first.');return}let form=new FormData();form.append('file',file);let q=document.getElementById('visionQuestion').value.trim()||'Describe the main objects and read visible text if possible.';let out=document.getElementById('visionAnswer');out.textContent='Analyzing locally...';try{let d=await api('/api/vision?question='+encodeURIComponent(q),{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin},body:form});out.textContent=d.answer+'\nOCR: '+(d.ocr_text||'(no text detected)')+'\nModel: '+d.model;setTranscript(q,d.answer,'VISION · OFFLINE');logActivity('Chosen image analyzed locally.')}catch(e){out.textContent=e.message}}
 async function askGlasses(){let question=document.getElementById('visionQuestion').value.trim();if(!question){alert('Enter a visual question first.');return}let out=document.getElementById('visionAnswer');out.textContent='Waiting for paired glasses and physical privacy switch...';try{let d=await api('/api/device/capture',{method:'POST',body:JSON.stringify({question})});out.textContent=d.answer+'\nOCR: '+(d.ocr_text||'(no text detected)')+'\nModel: '+d.model;setTranscript(question,d.answer,'GLASSES VISION · OFFLINE');logActivity('Requested one privacy-gated frame.')}catch(e){out.textContent=e.message;logActivity('Capture blocked: '+e.message)}}
 async function toggleCameraControl(){try{let d=await api('/api/camera/control',{method:'POST',body:JSON.stringify({enabled:!cameraEnabled})});cameraEnabled=d.dashboard_camera_enabled;await loadStatus();logActivity('Dashboard camera permission '+(cameraEnabled?'enabled':'disabled')+'.')}catch(e){alert(e.message)}}
+async function toggleMicrophoneControl(){try{let d=await api('/api/microphone/control',{method:'POST',body:JSON.stringify({enabled:!microphoneEnabled})});microphoneEnabled=d.dashboard_microphone_enabled;await loadStatus();logActivity('Device microphone '+(microphoneEnabled?'enabled':'disabled')+'.')}catch(e){alert(e.message)}}
 async function saveMemory(){let content=document.getElementById('memory').value.trim();if(!content)return;try{await api('/api/memory',{method:'POST',body:JSON.stringify({content})});document.getElementById('memory').value='';await loadMemories();logActivity('Memory saved to local SQLite.')}catch(e){alert(e.message)}}
 async function loadMemories(){try{let d=await api('/api/memory');document.getElementById('memories').innerHTML=d.items.length?d.items.slice(0,5).map(m=>'<div class="memitem">'+esc(m.content)+' <button onclick="deleteMemory('+m.id+')">Delete</button></div>').join(''):'<span class="tiny">No saved memories.</span>'}catch(e){document.getElementById('memories').textContent=e.message}}
 async function deleteMemory(id){try{await api('/api/memory/'+id,{method:'DELETE'});await loadMemories()}catch(e){alert(e.message)}}
