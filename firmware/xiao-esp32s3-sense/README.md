@@ -2,28 +2,29 @@
 
 This is candidate firmware, not verified firmware. Do not flash until the exact board/revision and pin map have been checked against the manufacturer's current documentation.
 
-## Protocol
-
+## Features in this candidate
 - Joins a private local Wi-Fi network.
 - Authenticates to the laptop using the shared .device-token.
-- Posts device state to /api/device/status.
+- Posts camera/privacy/microphone state to /api/device/status.
 - Polls /api/device/command for an explicit visual-question capture request.
-- Checks the physical privacy switch before capture and illuminates the external indicator during capture.
+- Checks the physical privacy switch before camera capture and illuminates the external indicator during capture.
 - Uploads one JPEG frame to /api/device/capture-result.
+- Captures short mono 16 kHz audio chunks from the candidate onboard PDM microphone and sends WAV data to /api/device/audio.
+- The laptop performs wake-phrase detection, speech recognition, local model inference, and best-effort offline speech output.
 
 ## Wiring assumptions to verify before power-up
-
-- Privacy switch: GPIO 2 to GND means enabled, using internal pull-up.
+- Privacy switch: GPIO 2 to GND means camera capture enabled, using internal pull-up.
 - Indicator LED: GPIO 21 through a suitable current-limiting resistor to GND.
-- Camera pin mapping is the candidate XIAO ESP32-S3 Sense mapping in src/main.cpp.
-- Built-in microphone transport is not implemented; firmware reports microphone_ready false.
+- Camera pin map is the candidate XIAO ESP32-S3 Sense mapping in src/main.cpp.
+- PDM microphone pins are assumed to be GPIO 41 (clock) and GPIO 42 (data). Verify against the exact hardware revision.
+- The camera switch gates firmware capture, not electrical power to the sensor. For a stronger physical guarantee, a technician must review a hardware power-gating design.
 
 ## Setup
-
-1. Install PlatformIO.
+1. Install PlatformIO and the supported ESP32-S3 Arduino toolchain.
 2. Copy secrets.example.h to secrets.h.
 3. Enter private Wi-Fi credentials, laptop LAN IPv4 address, and token from the laptop .device-token.
-4. Ensure laptop firewall permits the selected port only on the trusted private network.
-5. Compile before connecting hardware, then test with USB power and the privacy switch off first.
+4. Run the laptop in LAN mode on the same trusted private network.
+5. Compile before connecting hardware, then test over USB power with the camera switch off first.
+6. Confirm the actual microphone records cleanly and that the exact camera pin map matches the board before relying on it.
 
-Do not commit secrets.h. This firmware does not make the physical switch an electrical camera-power disconnect. It enforces the switch in firmware and checks it immediately before capture; a strict hardware-level power cut requires a properly designed camera power-gating circuit with adult/electronics-technician assistance.
+Do not commit secrets.h. HTTP is used on the local LAN, so use only a trusted private network and do not use public Wi-Fi.
