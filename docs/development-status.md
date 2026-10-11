@@ -8,8 +8,8 @@ This file distinguishes committed code from tested behavior.
 - Privacy-first opt-in short summaries rather than full transcript persistence
 - Local Ollama client with strict loopback-host validation and smaller fallback model
 - Local multilingual Whisper adapter with cached model reuse
-- Offline Windows SAPI/eSpeak speech output adapter
-- Local vision adapter for explicit image input
+- Offline Piper neural English/Telugu voice output with Windows SAPI/eSpeak fallback
+- Local Tesseract English/Telugu OCR plus local vision adapter for explicit image input
 - Explicit device capture queue and JPEG upload endpoint
 - Configurable wake phrase, audio chunk transcription, question collection, local inference, and speech output
 - Dashboard camera control default-off, plus physical-switch check in candidate firmware
