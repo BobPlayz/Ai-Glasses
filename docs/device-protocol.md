@@ -18,6 +18,7 @@ The laptop service is the local compute host. The device never calls an external
 - Firmware checks the physical switch immediately before camera capture.
 - The indicator must be illuminated while the sensor is capturing.
 - The server refuses to accept a capture result unless its last device status reports the switch and indicator as active.
+- If dashboard permission or the physical switch is disabled while a capture is pending, the server aborts the request and firmware stops the camera driver on its next poll.
 - Software status is not proof of electrical isolation. For a stronger physical guarantee, use a properly designed power-gating circuit after hardware review.
 
 ## Payload limits
