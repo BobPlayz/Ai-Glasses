@@ -1,56 +1,80 @@
 from __future__ import annotations
 
 import threading
+import tempfile
+import wave
+from pathlib import Path
 
 
 class SpeechOutputError(RuntimeError):
     pass
 
 
+ROOT = Path(__file__).resolve().parents[2]
+VOICE_DIR = ROOT / "models" / "tts"
+_voice_cache: dict[str, object] = {}
 _voice_lock = threading.Lock()
+_synthesis_lock = threading.Lock()
 
 
 def _is_telugu(text: str) -> bool:
-    return any("\u0c00" <= char <= "\u0c7f" for char in text)
+    return any("\\u0c00" <= char <= "\\u0c7f" for char in text)
 
 
-def speak_local(text: str) -> dict:
-    """Speak using installed Windows voices only. No cloud service or API key is used."""
-    text = text.strip()
-    if not text:
-        return {"spoken": False, "reason": "empty_text"}
+def _speak_with_piper(text: str, voice_key: str) -> dict | None:
+    model_path = VOICE_DIR / f"{voice_key}.onnx"
+    config_path = VOICE_DIR / f"{voice_key}.onnx.json"
+    if not model_path.is_file() or not config_path.is_file():
+        return None
 
+    try:
+        import winsound
+        from piper import PiperVoice
+
+        with _voice_lock:
+            voice = _voice_cache.get(voice_key)
+            if voice is None:
+                voice = PiperVoice.load(str(model_path), config_path=str(config_path))
+                _voice_cache[voice_key] = voice
+
+        with tempfile.NamedTemporaryFile(prefix="glasses-tts-", suffix=".wav", delete=False) as temp:
+            output_path = Path(temp.name)
+        try:
+            with _synthesis_lock:
+                with wave.open(str(output_path), "wb") as wav_file:
+                    voice.synthesize_wav(text[:1200], wav_file)
+                winsound.PlaySound(str(output_path), winsound.SND_FILENAME)
+        finally:
+            output_path.unlink(missing_ok=True)
+
+        return {
+            "spoken": True,
+            "engine": "Piper neural TTS",
+            "voice": voice_key,
+            "offline": True,
+            "language": "Telugu" if voice_key.startswith("te_") else "English",
+        }
+    except Exception:
+        return None
+
+
+def _speak_with_windows(text: str) -> dict | None:
     try:
         import pyttsx3
 
         with _voice_lock:
             engine = pyttsx3.init()
             voices = engine.getProperty("voices") or []
-            requested_telugu = _is_telugu(text)
-            hints = ("telugu", "te-in", "te_in", "tel")
             chosen = None
-
-            if requested_telugu:
-                for voice in voices:
-                    searchable = (
-                        str(getattr(voice, "id", "")) + " "
-                        + str(getattr(voice, "name", "")) + " "
-                        + str(getattr(voice, "languages", ""))
-                    ).casefold()
-                    if any(hint in searchable for hint in hints):
-                        chosen = voice
-                        break
-
-            if chosen is None and voices:
-                for voice in voices:
-                    searchable = (
-                        str(getattr(voice, "id", "")) + " "
-                        + str(getattr(voice, "name", ""))
-                    ).casefold()
-                    if "india" in searchable or "en-in" in searchable or "en_in" in searchable:
-                        chosen = voice
-                        break
-
+            hints = ("india", "en-in", "en_in")
+            for voice in voices:
+                searchable = (
+                    str(getattr(voice, "id", "")) + " "
+                    + str(getattr(voice, "name", ""))
+                ).casefold()
+                if any(hint in searchable for hint in hints):
+                    chosen = voice
+                    break
             if chosen is not None:
                 engine.setProperty("voice", chosen.id)
             engine.setProperty("rate", 175)
@@ -58,23 +82,43 @@ def speak_local(text: str) -> dict:
             engine.runAndWait()
             engine.stop()
 
-        telugu_found = bool(
-            chosen and any(
-                hint in (
-                    str(getattr(chosen, "id", "")) + " "
-                    + str(getattr(chosen, "name", ""))
-                ).casefold()
-                for hint in hints
-            )
-        )
         return {
             "spoken": True,
             "engine": "Windows SAPI / installed offline voice",
             "voice": str(getattr(chosen, "name", "Windows default voice")) if chosen else "Windows default voice",
             "offline": True,
-            "telugu_voice_found": telugu_found,
+            "language": "English",
         }
-    except Exception as exc:
-        raise SpeechOutputError(
-            "Windows offline speech failed. Check that a Windows text-to-speech voice is installed and audio is enabled."
-        ) from exc
+    except Exception:
+        return None
+
+
+def speak_local(text: str) -> dict:
+    """Use offline Piper neural English/Telugu voices; never calls a cloud TTS API."""
+    text = text.strip()
+    if not text:
+        return {"spoken": False, "reason": "empty_text"}
+
+    telugu = _is_telugu(text)
+    voice_key = "te_IN-maya-medium" if telugu else "en_GB-alan-medium"
+    result = _speak_with_piper(text, voice_key)
+    if result:
+        return result
+
+    if telugu:
+        return {
+            "spoken": False,
+            "engine": "Piper neural TTS",
+            "reason": "telugu_voice_not_installed",
+            "message": "The offline Telugu voice files are missing. Run scripts\\install_british_voice.ps1 to install both English and Telugu voice files.",
+            "offline": True,
+        }
+
+    result = _speak_with_windows(text)
+    if result:
+        result["fallback_reason"] = "Piper English voice files are missing or could not be loaded."
+        return result
+
+    raise SpeechOutputError(
+        "Offline speech failed. Install the Piper voice files or check that a Windows speech voice is installed."
+    )
