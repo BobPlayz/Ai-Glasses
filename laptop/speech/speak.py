@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VOICE_DIR = ROOT / "models" / "tts"
 _voice_cache: dict[str, object] = {}
 _voice_lock = threading.Lock()
+_synthesis_lock = threading.Lock()
 
 
 def _is_telugu(text: str) -> bool:
@@ -44,9 +45,10 @@ def _speak_with_piper(text: str) -> dict | None:
         with tempfile.NamedTemporaryFile(prefix="glasses-tts-", suffix=".wav", delete=False) as temp:
             output_path = Path(temp.name)
         try:
-            with wave.open(str(output_path), "wb") as wav_file:
-                voice.synthesize_wav(text[:1200], wav_file)
-            winsound.PlaySound(str(output_path), winsound.SND_FILENAME)
+            with _synthesis_lock:
+                with wave.open(str(output_path), "wb") as wav_file:
+                    voice.synthesize_wav(text[:1200], wav_file)
+                winsound.PlaySound(str(output_path), winsound.SND_FILENAME)
         finally:
             output_path.unlink(missing_ok=True)
         return {
