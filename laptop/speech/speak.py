@@ -33,7 +33,7 @@ def _speak_with_piper(text: str) -> dict | None:
         return None
 
     try:
-        from piper import PiperVoice, SynthesisConfig
+        from piper import PiperVoice
         import winsound
 
         with _voice_lock:
@@ -47,15 +47,7 @@ def _speak_with_piper(text: str) -> dict | None:
         try:
             with _synthesis_lock:
                 with wave.open(str(output_path), "wb") as wav_file:
-                    voice.synthesize_wav(
-                        text[:1200],
-                        wav_file,
-                        syn_config=SynthesisConfig(
-                            length_scale=0.98,
-                            noise_scale=0.72,
-                            noise_w_scale=0.82,
-                        ),
-                    )
+                    voice.synthesize_wav(text[:1200], wav_file)
                 winsound.PlaySound(str(output_path), winsound.SND_FILENAME)
         finally:
             output_path.unlink(missing_ok=True)
