@@ -62,7 +62,11 @@ def service_status(timeout: float = 2.0) -> dict:
         return {"available": False, "models": []}
 
 
-def ask_local(question: str, memories: list[str] | None = None) -> ModelReply:
+def ask_local(
+    question: str,
+    memories: list[str] | None = None,
+    history: list[dict[str, str]] | None = None,
+) -> ModelReply:
     question = question.strip()
     if not question:
         raise OllamaError("Enter a question first.")
@@ -87,12 +91,17 @@ def ask_local(question: str, memories: list[str] | None = None) -> ModelReply:
             {
                 "model": model,
                 "stream": False,
-                "keep_alive": "0",
+                "keep_alive": "10m",
                 "messages": [
                     {"role": "system", "content": system},
+                    *[
+                        {"role": item["role"], "content": item["content"][:1200]}
+                        for item in (history or [])[-8:]
+                        if item.get("role") in {"user", "assistant"} and item.get("content")
+                    ],
                     {"role": "user", "content": question},
                 ],
-                "options": {"temperature": 0.3, "num_ctx": 2048},
+                "options": {"temperature": 0.45, "num_ctx": 3072, "num_predict": 180},
             },
             timeout,
         )
