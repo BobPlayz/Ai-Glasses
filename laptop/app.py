@@ -9,6 +9,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from laptop.assistant.ollama_client import OllamaError, ask_local, service_status
+from laptop.memory.store import search_memories
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "memory.sqlite3"
@@ -48,10 +51,15 @@ def dashboard() -> str:
 
 @app.get("/api/status")
 def status() -> dict:
+    model_status = service_status()
     return {
         "app": "running",
-        "mode": "local scaffold",
-        "language_model": "not configured",
+        "mode": "local-only",
+        "language_model": (
+            "Ollama available; models: " + ", ".join(model_status["models"])
+            if model_status["available"] and model_status["models"]
+            else "Ollama unavailable or no models downloaded"
+        ),
         "speech_recognition": "not configured",
         "text_to_speech": "not configured",
         "vision_ocr": "not configured",
@@ -105,13 +113,19 @@ def clear_memories() -> dict:
 
 @app.post("/api/ask")
 def ask(payload: MemoryInput) -> dict:
+    question = payload.content.strip()
+    memories = search_memories(DB_PATH, question)
+    try:
+        reply = ask_local(question, memories)
+    except OllamaError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
-        "status": "not_configured",
-        "message": (
-            "The local AI model is not connected yet. This scaffold does not send "
-            "your question to a cloud service."
-        ),
-        "question_received": payload.content.strip(),
+        "status": "ok",
+        "answer": reply.text,
+        "model": reply.model,
+        "used_fallback": reply.used_fallback,
+        "memory_notes_used": len(memories),
+        "offline_inference": True,
     }
 
 
@@ -141,7 +155,7 @@ button{background:#153c51;color:var(--text);cursor:pointer;margin:3px 3px 3px 0}
 <p class="sub">Laptop-hosted assistant foundation. This dashboard reports the real scaffold status and will not pretend unconnected hardware or models are working.</p>
 <div class="grid">
 <section class="card"><div class="status"><i class="dot"></i><span>Scaffold running</span></div><h2 style="margin-top:12px">System status</h2><div id="status">Loading status...</div></section>
-<section class="card"><h2>Ask the local assistant</h2><p class="sub">Question handling is a placeholder until an offline model is installed.</p><label for="question">Question</label><textarea id="question" placeholder="Ask a test question..."></textarea><button onclick="ask()">Submit question</button><p id="answer" role="status"></p></section>
+<section class="card"><h2>Ask the local assistant</h2><p class="sub">Uses a model served by local Ollama. No cloud API is called.</p><label for="question">Question</label><textarea id="question" placeholder="Ask a test question..."></textarea><button onclick="ask()">Submit question</button><p id="answer" role="status"></p></section>
 <section class="card"><h2>Local memory</h2><p class="sub">Test persistent memory storage. Entries are saved on this laptop in SQLite.</p><label for="memory">Useful fact or summary</label><textarea id="memory" placeholder="Example: My exhibition is on October 22."></textarea><button onclick="saveMemory()">Save memory</button><button class="secondary" onclick="loadMemories()">Refresh</button><button class="danger" onclick="clearMemory()">Clear all</button><div id="memories" aria-live="polite"></div></section>
 <section class="card"><h2>Hardware privacy</h2><div class="note">No camera or microphone is connected in this software scaffold. Capture is unavailable, not silently enabled.</div><div class="kv"><span>Camera</span><span>Not connected</span></div><div class="kv"><span>Physical privacy switch</span><span>Not implemented</span></div><div class="kv"><span>Capture indicator</span><span>Not implemented</span></div></section>
 </div><p class="footer">Privacy: this build binds to localhost only. Do not expose it to Wi-Fi until authentication and access controls are added. No cloud AI is called by this scaffold.</p>
@@ -154,7 +168,7 @@ async function loadMemories(){try{var d=await api('/api/memory');var el=document
 async function saveMemory(){var content=document.getElementById('memory').value.trim();if(!content)return;try{await api('/api/memory',{method:'POST',body:JSON.stringify({content:content})});document.getElementById('memory').value='';await loadMemories()}catch(e){alert(e.message)}}
 async function deleteMemory(id){try{await api('/api/memory/'+id,{method:'DELETE'});await loadMemories()}catch(e){alert(e.message)}}
 async function clearMemory(){if(!confirm('Delete every saved memory from this local database?'))return;try{await api('/api/memory',{method:'DELETE'});await loadMemories()}catch(e){alert(e.message)}}
-async function ask(){var content=document.getElementById('question').value.trim();if(!content)return;try{var d=await api('/api/ask',{method:'POST',body:JSON.stringify({content:content})});document.getElementById('answer').textContent=d.message}catch(e){document.getElementById('answer').textContent=e.message}}
+async function ask(){var content=document.getElementById('question').value.trim();if(!content)return;var out=document.getElementById('answer');out.textContent='Thinking with the local model...';try{var d=await api('/api/ask',{method:'POST',body:JSON.stringify({content:content})});out.textContent=d.answer+'\\n\\nModel: '+d.model+(d.used_fallback?' (fallback model)':'')+' · Memory notes used: '+d.memory_notes_used}catch(e){out.textContent=e.message}}
 loadStatus();loadMemories();setInterval(loadStatus,10000);
 </script></body></html>
 """
