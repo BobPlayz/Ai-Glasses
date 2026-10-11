@@ -42,7 +42,7 @@ def extract_text_local(image_bytes: bytes) -> str:
             if image.width * image.height > 20_000_000:
                 image.thumbnail((4000, 4000))
             languages = "eng+tel" if (TESSDATA_DIR / "tel.traineddata").is_file() else "eng"
-            config = f'--tessdata-dir "{TESSDATA_DIR}"' if TESSDATA_DIR.is_dir() else ""
+            config = f"--tessdata-dir {TESSDATA_DIR}" if TESSDATA_DIR.is_dir() else ""
             text = pytesseract.image_to_string(image, lang=languages, config=config, timeout=12)
         return text.strip()[:6000]
     except Exception:
