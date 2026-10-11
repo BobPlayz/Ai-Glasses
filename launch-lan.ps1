@@ -11,6 +11,9 @@ $models = (& ollama list | Out-String)
 foreach ($required in @("qwen2.5:1.5b", "qwen2.5:0.5b", "moondream:1.8b")) {
     if ($models -notmatch [regex]::Escape($required)) { throw "Required local model $required is missing. Run .\setup.ps1." }
 }
+foreach ($voice in @("en_US-lessac-medium.onnx", "en_US-lessac-medium.onnx.json", "te_IN-maya-medium.onnx", "te_IN-maya-medium.onnx.json")) {
+    if (-not (Test-Path (Join-Path $PSScriptRoot ("models\tts\" + $voice)))) { throw "Offline voice asset $voice is missing. Run .\setup.ps1." }
+}
 
 Write-Host "LAN mode exposes the dashboard to devices on your current network." -ForegroundColor Yellow
 Write-Host "Use only a trusted private Wi-Fi/hotspot. Do not use public Wi-Fi." -ForegroundColor Yellow
