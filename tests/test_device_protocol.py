@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from laptop.app import app, DEVICE_TOKEN_PATH, PIN_PATH, normalize_speech
+from laptop.app import app, DEVICE_TOKEN_PATH, PIN_PATH, WAKE_PHRASE_PATH, normalize_speech
 
 
 class DeviceProtocolTests(unittest.TestCase):
@@ -11,6 +11,11 @@ class DeviceProtocolTests(unittest.TestCase):
         self.client = TestClient(app)
         self.old_token = DEVICE_TOKEN_PATH.read_text() if DEVICE_TOKEN_PATH.exists() else None
         self.old_pin = PIN_PATH.read_text() if PIN_PATH.exists() else None
+        self.old_wake_phrase = WAKE_PHRASE_PATH.read_text() if WAKE_PHRASE_PATH.exists() else None
+        app_module = __import__("laptop.app", fromlist=["_dashboard_camera_enabled"])
+        app_module._dashboard_camera_enabled = False
+        app_module._voice_armed = False
+        app_module._voice_question_parts = []
         DEVICE_TOKEN_PATH.write_text("test-device-token")
         PIN_PATH.write_text("test-dashboard-pin")
 
@@ -23,10 +28,32 @@ class DeviceProtocolTests(unittest.TestCase):
             PIN_PATH.unlink(missing_ok=True)
         else:
             PIN_PATH.write_text(self.old_pin)
+        if self.old_wake_phrase is None:
+            WAKE_PHRASE_PATH.unlink(missing_ok=True)
+        else:
+            WAKE_PHRASE_PATH.write_text(self.old_wake_phrase)
 
     def test_unicode_wake_phrase_normalization(self):
         self.assertEqual(normalize_speech("Hey, glasses!"), "hey glasses")
         self.assertEqual(normalize_speech("హే గ్లాసెస్"), "హే గ్లాసెస్")
+
+    def test_wake_phrase_detection_is_local(self):
+        from unittest.mock import patch
+        WAKE_PHRASE_PATH.write_text("hey glasses")
+        wav = b"RIFF" + b"0000" + b"WAVE" + b"test-audio"
+        with patch("laptop.app.transcribe_audio_file", return_value={"text": "Hey, glasses", "language": "en"}):
+            response = self.client.post(
+                "/api/device/audio",
+                content=wav,
+                headers={"X-Device-Token": "test-device-token", "Content-Type": "audio/wav"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["wake_detected"])
+        self.assertEqual(response.json()["state"], "awake")
+
+    def test_camera_capture_disabled_by_default(self):
+        response = self.client.post("/api/device/capture", json={"question":"What am I looking at?"})
+        self.assertEqual(response.status_code, 403)
 
     def test_device_token_required(self):
         response = self.client.get("/api/device/command")
