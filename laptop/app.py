@@ -411,6 +411,11 @@ async def device_audio(request: Request) -> dict:
         _voice_last_event = {"state": "listening", "detail": "No question text was recognized."}
         return {"state": "listening", "transcript": "", "wake_detected": False}
     if is_visual_question(question):
+        _voice_last_event = {
+            "state": "capturing",
+            "detail": "A visual question was detected. Requesting one frame under both privacy controls.",
+            "question": question,
+        }
         try:
             visual = await capture_frame_for_question(question)
             spoken_text = short_speech_text(visual["answer"])
