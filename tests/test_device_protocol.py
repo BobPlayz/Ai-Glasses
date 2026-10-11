@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from laptop.app import app, DEVICE_TOKEN_PATH, PIN_PATH, WAKE_PHRASE_PATH, normalize_speech
+from laptop.app import app, DEVICE_TOKEN_PATH, PIN_PATH, WAKE_PHRASE_PATH, normalize_speech, is_visual_question
 
 
 class DeviceProtocolTests(unittest.TestCase):
@@ -36,6 +36,12 @@ class DeviceProtocolTests(unittest.TestCase):
     def test_unicode_wake_phrase_normalization(self):
         self.assertEqual(normalize_speech("Hey, glasses!"), "hey glasses")
         self.assertEqual(normalize_speech("హే గ్లాసెస్"), "హే గ్లాసెస్")
+
+    def test_visual_question_detection_in_english_and_telugu(self):
+        self.assertTrue(is_visual_question("What am I looking at?"))
+        self.assertTrue(is_visual_question("Read this sign"))
+        self.assertTrue(is_visual_question("ఇది ఏమిటి"))
+        self.assertFalse(is_visual_question("What is the capital of India?"))
 
     def test_wake_phrase_detection_is_local(self):
         from unittest.mock import patch
