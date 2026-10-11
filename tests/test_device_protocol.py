@@ -13,13 +13,19 @@ class DeviceProtocolTests(unittest.TestCase):
         self.old_pin = PIN_PATH.read_text() if PIN_PATH.exists() else None
         self.old_wake_phrase = WAKE_PHRASE_PATH.read_text() if WAKE_PHRASE_PATH.exists() else None
         app_module = __import__("laptop.app", fromlist=["_dashboard_camera_enabled"])
+        self.app_module = app_module
+        self.old_camera_enabled = app_module._dashboard_camera_enabled
+        self.old_microphone_enabled = app_module._dashboard_microphone_enabled
         app_module._dashboard_camera_enabled = False
+        app_module._dashboard_microphone_enabled = False
         app_module._voice_armed = False
         app_module._voice_question_parts = []
         DEVICE_TOKEN_PATH.write_text("test-device-token")
         PIN_PATH.write_text("test-dashboard-pin")
 
     def tearDown(self):
+        self.app_module._dashboard_camera_enabled = self.old_camera_enabled
+        self.app_module._dashboard_microphone_enabled = self.old_microphone_enabled
         if self.old_token is None:
             DEVICE_TOKEN_PATH.unlink(missing_ok=True)
         else:
@@ -46,6 +52,8 @@ class DeviceProtocolTests(unittest.TestCase):
     def test_wake_phrase_detection_is_local(self):
         from unittest.mock import patch
         WAKE_PHRASE_PATH.write_text("hey glasses")
+        permission = self.client.post("/api/microphone/control", json={"enabled": True})
+        self.assertEqual(permission.status_code, 200)
         wav = b"RIFF" + b"0000" + b"WAVE" + b"test-audio"
         with patch("laptop.app.transcribe_audio_file", return_value={"text": "Hey, glasses", "language": "en"}):
             response = self.client.post(
