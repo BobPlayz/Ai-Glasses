@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 
 class SpeechError(RuntimeError):
     pass
+
+
+_model_cache: dict[str, object] = {}
+_model_lock = threading.Lock()
 
 
 def transcribe_audio_file(audio_path: str | Path, model_size: str | None = None) -> dict:
@@ -25,13 +30,17 @@ def transcribe_audio_file(audio_path: str | Path, model_size: str | None = None)
     size = model_size or os.environ.get("GLASSES_WHISPER_MODEL", "base")
     cache_dir = Path(os.environ.get("GLASSES_MODEL_CACHE", Path(__file__).resolve().parents[2] / "models" / "whisper"))
     try:
-        model = WhisperModel(
-            size,
-            device="cpu",
-            compute_type="int8",
-            download_root=str(cache_dir),
-            local_files_only=True,
-        )
+        with _model_lock:
+            model = _model_cache.get(size)
+            if model is None:
+                model = WhisperModel(
+                    size,
+                    device="cpu",
+                    compute_type="int8",
+                    download_root=str(cache_dir),
+                    local_files_only=True,
+                )
+                _model_cache[size] = model
         segments, info = model.transcribe(str(path), beam_size=3, vad_filter=True)
         text = " ".join(segment.text.strip() for segment in segments).strip()
     except Exception as exc:
