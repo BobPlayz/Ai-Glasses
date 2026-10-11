@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
 import threading
 import wave
 from pathlib import Path
+
+import httpx
 
 
 class SpeechOutputError(RuntimeError):
@@ -14,6 +17,9 @@ class SpeechOutputError(RuntimeError):
 
 ROOT = Path(__file__).resolve().parents[2]
 VOICE_DIR = ROOT / "models" / "tts"
+FISH_KEY_PATH = ROOT / ".fish-audio-key"
+FISH_VOICE_ID = "e13fa398a7f445a685316a3de6089ce7"
+FISH_MODEL = "s2.1-pro-free"
 _voice_cache: dict[str, object] = {}
 _voice_lock = threading.Lock()
 _synthesis_lock = threading.Lock()
@@ -23,8 +29,70 @@ def _is_telugu(text: str) -> bool:
     return any("\u0c00" <= char <= "\u0c7f" for char in text)
 
 
+def _fish_api_key() -> str:
+    key = os.environ.get("FISH_AUDIO_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        return FISH_KEY_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _speak_with_fish(text: str) -> dict | None:
+    """Use the user's selected Fish Audio voice for English; the API needs internet."""
+    if _is_telugu(text):
+        return None
+    api_key = _fish_api_key()
+    if not api_key:
+        return None
+
+    import winsound
+
+    response = httpx.post(
+        "https://api.fish.audio/v1/tts",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "model": FISH_MODEL,
+            "Content-Type": "application/json",
+        },
+        json={
+            "text": text[:1200],
+            "reference_id": FISH_VOICE_ID,
+            "format": "wav",
+            "normalize": True,
+        },
+        timeout=httpx.Timeout(90.0, connect=15.0),
+    )
+    if response.status_code >= 400:
+        detail = response.text[:240].replace("\n", " ")
+        raise SpeechOutputError(
+            f"Fish Audio voice request failed (HTTP {response.status_code}). "
+            f"Check your API key and Fish Audio quota. {detail}"
+        )
+    if not response.content:
+        raise SpeechOutputError("Fish Audio returned an empty audio response.")
+
+    with tempfile.NamedTemporaryFile(prefix="glasses-fish-", suffix=".wav", delete=False) as temp:
+        output_path = Path(temp.name)
+        temp.write(response.content)
+    try:
+        with _synthesis_lock:
+            winsound.PlaySound(str(output_path), winsound.SND_FILENAME)
+    finally:
+        output_path.unlink(missing_ok=True)
+
+    return {
+        "spoken": True,
+        "engine": "Fish Audio",
+        "voice": FISH_VOICE_ID,
+        "model": FISH_MODEL,
+        "offline": False,
+    }
+
+
 def _speak_with_kokoro(text: str) -> dict | None:
-    """Use Kokoro's more expressive British voice for English when installed and cached."""
+    """Offline English fallback if the Fish Audio key is absent or its service is unavailable."""
     if _is_telugu(text):
         return None
     try:
@@ -33,8 +101,6 @@ def _speak_with_kokoro(text: str) -> dict | None:
         import winsound
         from kokoro import KPipeline
 
-        # 'b' selects Kokoro's British-English pipeline; bm_george is a calm
-        # British male voice. Keep the pipeline resident to avoid reload delays.
         with _voice_lock:
             pipeline = _voice_cache.get("kokoro-b")
             if pipeline is None:
@@ -44,10 +110,7 @@ def _speak_with_kokoro(text: str) -> dict | None:
         chunks = []
         with _synthesis_lock:
             for _graphemes, _phonemes, audio in pipeline(
-                text[:1200],
-                voice="bm_george",
-                speed=0.94,
-                split_pattern=r"\n+",
+                text[:1200], voice="bm_george", speed=0.94, split_pattern=r"\n+"
             ):
                 if audio is not None and len(audio):
                     chunks.append(np.asarray(audio, dtype=np.float32))
@@ -66,11 +129,10 @@ def _speak_with_kokoro(text: str) -> dict | None:
         return {
             "spoken": True,
             "engine": "Kokoro neural TTS",
-            "voice": "bm_george (British English)",
+            "voice": "bm_george (British English fallback)",
             "offline": True,
         }
     except Exception:
-        # Never break the glasses if Kokoro isn't installed or its assets aren't cached.
         return None
 
 
@@ -112,17 +174,43 @@ def _speak_with_piper(text: str) -> dict | None:
 
 
 def speak_local(text: str) -> dict:
-    """Prefer Kokoro for natural English, retaining Piper for Telugu and offline fallback."""
+    """Prefer the selected Fish Audio voice for English; keep Telugu and offline fallbacks local."""
     text = text.strip()
     if not text:
         return {"spoken": False, "reason": "empty_text"}
 
+    if not _is_telugu(text) and _fish_api_key():
+        try:
+            fish_result = _speak_with_fish(text)
+            if fish_result:
+                return fish_result
+        except httpx.HTTPError as exc:
+            # A temporary network failure should not stop the glasses from speaking.
+            fish_error = f"Fish Audio connection failed: {exc.__class__.__name__}"
+        except SpeechOutputError as exc:
+            # Report configuration/quota errors instead of silently pretending Fish spoke.
+            return {
+                "spoken": False,
+                "engine": "Fish Audio",
+                "reason": "fish_audio_failed",
+                "message": str(exc),
+                "offline": False,
+            }
+        else:
+            fish_error = ""
+    else:
+        fish_error = ""
+
     kokoro_result = _speak_with_kokoro(text)
     if kokoro_result:
+        if fish_error:
+            kokoro_result["fallback_reason"] = fish_error
         return kokoro_result
 
     piper_result = _speak_with_piper(text)
     if piper_result:
+        if fish_error:
+            piper_result["fallback_reason"] = fish_error
         return piper_result
 
     try:
@@ -156,6 +244,7 @@ def speak_local(text: str) -> dict:
             "engine": "Windows SAPI / installed offline voice",
             "offline": True,
             "telugu_voice_found": bool(chosen and any(h in (str(getattr(chosen, "id", "")) + str(getattr(chosen, "name", ""))).casefold() for h in language_hints)),
+            **({"fallback_reason": fish_error} if fish_error else {}),
         }
     except Exception:
         pass

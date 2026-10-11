@@ -23,4 +23,5 @@ firmware/**/secrets.h
 models/tesseract/
 models/tts/
 models/whisper/
+.fish-audio-key
 fish-audio-key
