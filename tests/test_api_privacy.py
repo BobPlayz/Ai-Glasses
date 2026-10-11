@@ -107,6 +107,22 @@ class DevicePrivacyApiTests(unittest.TestCase):
         )
         self.assertEqual(valid_pin.status_code, 200)
 
+    def test_phone_camera_rejects_public_ip(self):
+        response = self.client.post(
+            "/api/phone-camera/analyze",
+            json={"snapshot_url": "http://8.8.8.8:8080/shot.jpg", "question": "What is this?"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("private", response.json()["detail"].lower())
+
+    def test_phone_camera_requires_snapshot_image_path(self):
+        response = self.client.post(
+            "/api/phone-camera/analyze",
+            json={"snapshot_url": "http://192.168.1.50:8080/video", "question": "What is this?"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("shot.jpg", response.json()["detail"])
+
     def test_device_routes_require_pairing_token(self):
         response = self.client.get("/api/device/command")
         self.assertEqual(response.status_code, 401)
