@@ -6,6 +6,7 @@
 - Setup validates cached voice synthesis, local text/vision/OCR services, Python compilation, unit tests, and candidate firmware compilation before writing the setup-complete marker.
 - Local Ollama text inference, fallback model, SQLite memory, opt-in conversation summaries, cached multilingual Whisper transcription, offline Piper English/Telugu speech, Tesseract OCR, and local vision adapter.
 - Localhost dashboard and optional PIN-protected LAN dashboard.
+- Connections hub with glasses Wi-Fi heartbeat status, one-click camera/microphone permission toggles, laptop microphone connect/disconnect, and local speech-output test.
 - Device API uses a private pairing token.
 - Camera capture defaults off and requires dashboard permission plus the physical privacy switch and indicator status.
 - Device microphone defaults off. The dashboard has an explicit opt-in switch, the server rejects audio uploads while disabled, firmware only reads/uploads while permission is active, and in-flight transcription results are discarded if permission is revoked.
@@ -41,7 +42,8 @@ Before connecting hardware:
 4. Use the laptop microphone simulator and confirm transcription works.
 5. Confirm dashboard camera and device microphone controls both start disabled.
 6. Confirm the device microphone endpoint returns HTTP 403 while disabled.
-7. Run `python -m unittest discover -s tests -v` and `pio run -d firmware/xiao-esp32s3-sense` after setup.
+7. Use the Connections hub to check glasses Wi-Fi status, toggle camera/microphone permissions, connect/disconnect the laptop microphone, and test local speech output.
+8. Run `python -m unittest discover -s tests -v` and `pio run -d firmware/xiao-esp32s3-sense` after setup.
 
 ## Hardware integration is still unverified
 
