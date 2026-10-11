@@ -343,7 +343,7 @@ async def device_audio(request: Request) -> dict:
         if not normalized_phrase or normalized_phrase not in normalized:
             _voice_last_event = {"state": "listening", "detail": "Waiting for the configured wake phrase."}
             return {"state": "listening", "transcript": transcript, "wake_detected": False}
-        phrase_pattern = r"[\\W_]+".join(re.escape(part) for part in phrase.split())
+        phrase_pattern = r"[\W_]+".join(re.escape(part) for part in phrase.split())
         phrase_match = re.search(phrase_pattern, transcript, flags=re.IGNORECASE | re.UNICODE)
         suffix = transcript[phrase_match.end():].strip(" ,.!?;:") if phrase_match else ""
         if len(suffix.split()) < 2:
