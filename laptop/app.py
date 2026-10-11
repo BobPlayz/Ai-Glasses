@@ -410,6 +410,14 @@ async def device_audio(request: Request) -> dict:
     finally:
         path.unlink(missing_ok=True)
 
+    # A user may revoke permission while a chunk is being transcribed. Discard it
+    # rather than continuing the voice interaction after opt-out.
+    if not _dashboard_microphone_enabled:
+        _voice_armed = False
+        _voice_question_parts = []
+        _voice_last_event = {"state": "disabled", "detail": "Microphone permission was revoked while processing audio."}
+        return {"state": "disabled", "transcript": "", "wake_detected": False}
+
     global _voice_question_parts
     transcript = (result.get("text") or "").strip()
     if not transcript:
