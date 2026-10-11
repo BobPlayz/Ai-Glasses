@@ -127,7 +127,7 @@ def current_wake_phrase() -> str:
 
 
 def normalize_speech(text: str) -> str:
-    return re.sub(r"[^a-z0-9\\s]", " ", text.casefold()).strip()
+    return re.sub(r"[^\\w\\s]", " ", text.casefold(), flags=re.UNICODE).strip()
 
 
 def verify_device_token(x_device_token: str | None = Header(default=None)) -> None:
@@ -215,18 +215,16 @@ def list_conversations() -> dict:
 
 
 def save_conversation(user_text: str, assistant_text: str, model: str, remember_summary: bool) -> None:
+    if not remember_summary:
+        return
     timestamp = datetime.now(timezone.utc).isoformat()
+    # Privacy-first default: do not persist full conversation transcripts.
+    summary = f"Conversation summary: User asked: {user_text[:180]}. Assistant answered: {assistant_text[:320]}"
     with connect_db() as db:
         db.execute(
-            "INSERT INTO conversations (user_text, assistant_text, model, created_at) VALUES (?, ?, ?, ?)",
-            (user_text[:2000], assistant_text[:6000], model[:100], timestamp),
+            "INSERT INTO memories (content, created_at) VALUES (?, ?)",
+            (summary, timestamp),
         )
-        if remember_summary:
-            # Only save a concise extract when explicitly requested.
-            db.execute(
-                "INSERT INTO memories (content, created_at) VALUES (?, ?)",
-                (f"Conversation summary: User asked: {user_text[:240]}. Assistant answered: {assistant_text[:500]}", timestamp),
-            )
 
 
 @app.post("/api/ask", dependencies=[Depends(verify_dashboard_pin)])
