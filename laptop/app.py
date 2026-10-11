@@ -137,6 +137,23 @@ def normalize_speech(text: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", text.casefold(), flags=re.UNICODE).split())
 
 
+def short_speech_text(text: str, limit: int = 220) -> str:
+    clean = " ".join(text.strip().split())
+    if len(clean) <= limit:
+        return clean
+    sentences = re.split(r"(?<=[.!?।])\s+", clean)
+    chosen = ""
+    for sentence in sentences:
+        candidate = (chosen + " " + sentence).strip()
+        if len(candidate) > limit:
+            break
+        chosen = candidate
+    if chosen:
+        return chosen
+    clipped = clean[:limit]
+    return clipped.rsplit(" ", 1)[0] if " " in clipped else clipped
+
+
 def verify_device_token(x_device_token: str | None = Header(default=None)) -> None:
     expected = read_secret(DEVICE_TOKEN_PATH)
     if not expected:
@@ -171,6 +188,8 @@ def status() -> dict:
         "microphone": "streaming local audio" if _last_device_status.get("microphone_ready") and time.time() - _last_device_status.get("updated_at", 0) < 8 else "not connected",
         "wake_phrase": current_wake_phrase(),
         "voice_state": _voice_last_event.get("state", "idle"),
+        "voice_question": _voice_last_event.get("question", ""),
+        "voice_answer": _voice_last_event.get("answer", ""),
         "privacy_indicator": "on" if _last_device_status.get("indicator_on") else "off / not verified",
         "memory": "local SQLite enabled",
         "network_dashboard": "PIN protected" if dashboard_pin_required() else "localhost mode",
@@ -296,7 +315,9 @@ def set_wake_phrase(payload: WakePhraseInput) -> dict:
 @app.post("/api/speech/speak", dependencies=[Depends(verify_dashboard_pin)])
 def speak(payload: MemoryInput) -> dict:
     try:
-        return speak_local(payload.content)
+        spoken_text = short_speech_text(payload.content)
+        result = speak_local(spoken_text)
+        return {**result, "spoken_text": spoken_text, "shortened_for_speech": spoken_text != payload.content.strip()}
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -380,8 +401,14 @@ async def device_audio(request: Request) -> dict:
         _voice_last_event = {"state": "error", "detail": str(exc)}
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     save_conversation(question, reply.text, reply.model, False)
-    speech = await run_in_threadpool(speak_local, reply.text[:700])
-    _voice_last_event = {"state": "answered", "detail": f"Answered using {reply.model}."}
+    spoken_text = short_speech_text(reply.text)
+    speech = await run_in_threadpool(speak_local, spoken_text)
+    _voice_last_event = {
+        "state": "answered",
+        "detail": f"Answered using {reply.model}.",
+        "question": question,
+        "answer": reply.text,
+    }
     return {
         "state": "answered",
         "transcript": question,
