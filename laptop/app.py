@@ -423,7 +423,7 @@ async def analyze_phone_camera(payload: PhoneCameraInput) -> dict:
         raise HTTPException(status_code=502, detail="Could not reach the phone camera. Check the phone app, URL, and same-Wi-Fi connection.") from exc
     if not raw or len(raw) > 8 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Phone camera frame is empty or exceeds the 8 MB limit.")
-    if content_type not in {"image/jpeg", "image/png"} or not (raw.startswith(b"\\xff\\xd8\\xff") or raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n")):
+    if content_type not in {"image/jpeg", "image/png"} or not (raw.startswith(b"\xff\xd8\xff") or raw.startswith(b"\x89PNG\r\n\x1a\n")):
         raise HTTPException(status_code=415, detail="The phone URL did not return a JPEG or PNG still image.")
     try:
         result = await run_in_threadpool(ask_image_local, raw, payload.question.strip())
