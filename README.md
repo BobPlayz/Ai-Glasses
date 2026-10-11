@@ -52,6 +52,16 @@ For laptop-only mode:
 
 Open http://127.0.0.1:8765.
 
+### Use an Android phone as a temporary camera
+
+1. Install **IP Webcam** from the Play Store on the OnePlus phone.
+2. Connect the phone and laptop to the same trusted Wi-Fi network.
+3. Open IP Webcam and tap **Start server**. Keep the app open.
+4. The app shows a phone URL such as `http://192.168.1.50:8080`. In the laptop dashboard, open **Android phone camera** and enter `http://192.168.1.50:8080/shot.jpg` using your actual phone IP.
+5. Press **Test connection**, then enter a question in the vision question field and press **Capture & analyze**.
+
+This bridge requests one still frame per button press, not continuous video. The laptop fetches the snapshot over the local network and sends it to the existing local vision/OCR pipeline. It accepts only private-LAN IP addresses and JPEG/PNG still-image URLs. Keep both devices on a trusted network, and stop the IP Webcam server or press Disconnect when finished. This phone-camera route is separate from the glasses camera privacy switch.
+
 For phone access on a trusted private Wi-Fi network:
 
     .\launch-lan.ps1
