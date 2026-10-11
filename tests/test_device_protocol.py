@@ -58,7 +58,8 @@ class DeviceProtocolTests(unittest.TestCase):
         self.assertEqual(response.json()["state"], "awake")
 
     def test_camera_capture_disabled_by_default(self):
-        response = self.client.post("/api/device/capture", json={"question":"What am I looking at?"})
+        with patch.dict("os.environ", {"GLASSES_LAN_MODE":"0"}):
+            response = self.client.post("/api/device/capture", json={"question":"What am I looking at?"})
         self.assertEqual(response.status_code, 403)
 
     def test_device_token_required(self):
