@@ -22,7 +22,7 @@ bool privacySwitchEnabled() {
   return digitalRead(PRIVACY_SWITCH_PIN) == LOW;
 }
 
-String apiUrl(const char* path) {
+String apiUrl(const String& path) {
   String base = String(LAPTOP_BASE_URL);
   while (base.endsWith("/")) base.remove(base.length() - 1);
   return base + path;
@@ -191,7 +191,18 @@ void loop() {
     delay(500);
     return;
   }
-  if (!privacySwitchEnabled()) setIndicator(false);
+  if (!privacySwitchEnabled()) {
+    setIndicator(false);
+    if (cameraReady) {
+      esp_camera_deinit();
+      cameraReady = false;
+      Serial.println("Privacy switch off: camera driver stopped.");
+      postStatus();
+    }
+  } else if (!cameraReady) {
+    cameraReady = initCamera();
+    postStatus();
+  }
 
   unsigned long now = millis();
   if (now - lastStatus >= STATUS_INTERVAL_MS) {
