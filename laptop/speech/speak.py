@@ -100,7 +100,7 @@ def speak_local(text: str) -> dict:
         return {"spoken": False, "reason": "empty_text"}
 
     telugu = _is_telugu(text)
-    voice_key = "te_IN-maya-medium" if telugu else "en_GB-alan-medium"
+    voice_key = "te_IN-venkatesh-medium" if telugu else "en_GB-alan-medium"
     result = _speak_with_piper(text, voice_key)
     if result:
         return result
