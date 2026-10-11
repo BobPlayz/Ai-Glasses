@@ -1,0 +1,1 @@
+"""Local image understanding adapters."""
