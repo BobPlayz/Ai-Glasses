@@ -66,8 +66,8 @@ Write-Host "Caching offline neural English and Telugu voices..." -ForegroundColo
 $ttsDir = Join-Path $PSScriptRoot "models\tts"
 New-Item -ItemType Directory -Force -Path $ttsDir | Out-Null
 $voiceFiles = @(
-    @{ Name = "en_US-lessac-medium.onnx"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx?download=true" },
-    @{ Name = "en_US-lessac-medium.onnx.json"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json?download=true" },
+    @{ Name = "en_GB-alan-medium.onnx"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx?download=true" },
+    @{ Name = "en_GB-alan-medium.onnx.json"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx.json?download=true" },
     @{ Name = "te_IN-maya-medium.onnx"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/te/te_IN/maya/medium/te_IN-maya-medium.onnx?download=true" },
     @{ Name = "te_IN-maya-medium.onnx.json"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/te/te_IN/maya/medium/te_IN-maya-medium.onnx.json?download=true" }
 )
