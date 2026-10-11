@@ -1,31 +1,39 @@
 # Test plan
 
-## Laptop scaffold
+## Automated laptop checks
+- [ ] Python compileall passes
+- [ ] Unit tests pass
+- [ ] Dashboard PIN is required in LAN mode
+- [ ] Device token is required for device endpoints
+- [ ] Camera capture is refused when dashboard control is off
+- [ ] Wake phrase normalization supports English and Telugu characters
+
+## Laptop runtime
 - [ ] Run setup.ps1 on Windows 11.
-- [ ] Run launch.ps1 and open the dashboard.
+- [ ] Open dashboard in localhost mode.
 - [ ] Save memory, restart the app, verify persistence.
 - [ ] Delete one memory and clear all memories.
-- [ ] Confirm /api/ask says the model is not configured.
-- [ ] Confirm camera and microphone show unavailable.
+- [ ] Ask in English and everyday Andhra Telugu.
+- [ ] Confirm the smaller model fallback can answer when primary is unavailable/too slow.
+- [ ] Verify local speech output and actual Telugu voice quality.
+- [ ] Transcribe an audio file while internet is disconnected.
+- [ ] Ask a question about a chosen image while internet is disconnected.
 
-## AI integration
-- [ ] Run local model without internet.
-- [ ] Measure response latency and RAM use.
-- [ ] Test English and everyday Andhra Telugu recognition.
-- [ ] Test short spoken and long text responses.
-- [ ] Test local vision and OCR separately.
-- [ ] Confirm no cloud endpoints are called.
-
-## Hardware
-- [ ] Camera frame arrives over local Wi-Fi.
-- [ ] Microphone stream arrives with acceptable latency.
-- [ ] Physical switch disables capture.
-- [ ] Indicator illuminates whenever capture is active.
+## Physical device
+- [ ] Confirm exact board revision and pin map before wiring.
+- [ ] Compile firmware and flash over USB.
+- [ ] Device connects to trusted local Wi-Fi and authenticates.
+- [ ] Camera control disabled: camera driver stays stopped and no capture is accepted.
+- [ ] Dashboard enabled plus physical switch enabled: indicator lights during capture and frame arrives.
+- [ ] Physical switch off: capture is refused and camera driver stops.
+- [ ] Microphone sends short WAV chunks, wake phrase arms the assistant, question is collected until a pause, local answer is returned.
 - [ ] Device reconnects after Wi-Fi interruption.
-- [ ] Test with internet disconnected and on the exhibition network.
+- [ ] Confirm no raw audio files remain in the temp folder.
 
-## Demo
-- [ ] Repeat the full live demo successfully at least three times.
-- [ ] Confirm no secrets or private data are in Git.
-- [ ] Label backup video as backup.
-- [ ] Label every feature as implemented, laptop-tested, or physical-device-tested.
+## Offline demo
+- [ ] Disconnect internet and repeat the complete demo successfully at least three times.
+- [ ] Confirm all required models are already cached.
+- [ ] Rehearse on the actual exhibition network and laptop speakers.
+- [ ] Keep backup video clearly labelled as backup.
+- [ ] Do not capture visitors without permission.
+- [ ] Mark every result as code-tested, laptop-tested, or physical-device-tested.
