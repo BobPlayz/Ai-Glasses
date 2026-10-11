@@ -34,7 +34,7 @@ From PowerShell in the repository directory:
     Set-ExecutionPolicy -Scope Process Bypass
     .\setup.ps1
 
-Setup creates the Python environment, installs dependencies, creates a private dashboard PIN and device pairing token, and offers to cache local speech and Ollama models. Keep the PIN and token private. If Ollama was installed during setup but is not available in the current shell, reopen PowerShell and rerun setup to finish model caching.
+Setup creates the Python environment, installs dependencies, creates a private dashboard PIN and device pairing token, downloads and verifies the local speech/OCR assets, pulls the Ollama models, compiles the candidate firmware, and runs the software checks. The first run needs internet and can take a while because the model files are large. Keep the PIN and token private. If Ollama was installed during setup but is not available in the current shell, reopen PowerShell and rerun setup to finish model caching.
 
 For an existing setup, install and verify the offline male English and Telugu voices without repeating all model downloads:
 
