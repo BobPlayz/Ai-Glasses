@@ -36,6 +36,10 @@ From PowerShell in the repository directory:
 
 Setup creates the Python environment, installs dependencies, creates a private dashboard PIN and device pairing token, and offers to cache local speech and Ollama models. Keep the PIN and token private. If Ollama was installed during setup but is not available in the current shell, reopen PowerShell and rerun setup to finish model caching.
 
+For an existing setup, install and verify the British voice without repeating all model downloads:
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\install_british_voice.ps1
+
 For laptop-only mode:
 
     .\launch.ps1
