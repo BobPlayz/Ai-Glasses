@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -20,6 +21,9 @@ class DevicePrivacyApiTests(unittest.TestCase):
         self.old_camera_enabled = glasses_app._dashboard_camera_enabled
         self.old_status = glasses_app._last_device_status
         self.old_voice_state = glasses_app._voice_last_event
+        self.old_voice_armed = glasses_app._voice_armed
+        self.old_voice_parts = glasses_app._voice_question_parts
+        self.old_capture_request = glasses_app._capture_request
         self.addCleanup(self.restore_state)
 
         glasses_app.DEVICE_TOKEN_PATH = root / ".device-token"
@@ -30,6 +34,9 @@ class DevicePrivacyApiTests(unittest.TestCase):
         glasses_app._dashboard_camera_enabled = False
         glasses_app._last_device_status = {"connected": False}
         glasses_app._voice_last_event = {"state": "idle", "detail": ""}
+        glasses_app._voice_armed = False
+        glasses_app._voice_question_parts = []
+        glasses_app._capture_request = None
         self.client = TestClient(glasses_app.app)
         self.headers = {"X-Device-Token": "test-device-token"}
 
@@ -40,6 +47,9 @@ class DevicePrivacyApiTests(unittest.TestCase):
         glasses_app._dashboard_camera_enabled = self.old_camera_enabled
         glasses_app._last_device_status = self.old_status
         glasses_app._voice_last_event = self.old_voice_state
+        glasses_app._voice_armed = self.old_voice_armed
+        glasses_app._voice_question_parts = self.old_voice_parts
+        glasses_app._capture_request = self.old_capture_request
         if self.old_lan_mode is None:
             os.environ.pop("GLASSES_LAN_MODE", None)
         else:
@@ -73,6 +83,29 @@ class DevicePrivacyApiTests(unittest.TestCase):
         self.assertFalse(disabled.json()["dashboard_microphone_enabled"])
         command = self.client.get("/api/device/command", headers=self.headers)
         self.assertFalse(command.json()["microphone_allowed"])
+
+    def test_enabled_microphone_audio_reaches_local_transcriber(self):
+        self.client.post("/api/microphone/control", json={"enabled": True})
+        with patch("laptop.app.transcribe_audio_file", return_value={"text": "", "model": "base"}):
+            response = self.client.post(
+                "/api/device/audio",
+                headers={**self.headers, "Content-Type": "audio/wav"},
+                content=b"RIFF\x00\x00\x00\x00WAVE",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["state"], "listening")
+
+    def test_lan_dashboard_mutation_requires_pin(self):
+        os.environ["GLASSES_LAN_MODE"] = "1"
+        missing_pin = self.client.post("/api/microphone/control", json={"enabled": True})
+        self.assertEqual(missing_pin.status_code, 401)
+        glasses_app.PIN_PATH.write_text("test-pin", encoding="utf-8")
+        valid_pin = self.client.post(
+            "/api/microphone/control",
+            headers={"X-Dashboard-Pin": "test-pin"},
+            json={"enabled": True},
+        )
+        self.assertEqual(valid_pin.status_code, 200)
 
     def test_device_routes_require_pairing_token(self):
         response = self.client.get("/api/device/command")
