@@ -1,5 +1,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+$readyMarker = Join-Path $PSScriptRoot "data\.setup-complete"
+if (Test-Path $readyMarker) { Remove-Item $readyMarker -Force }
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " AI Glasses full setup" -ForegroundColor Cyan
 Write-Host " This prepares software, local models, and candidate firmware."
@@ -86,6 +88,24 @@ if ($LASTEXITCODE -ne 0) { throw "Fallback language model download failed." }
 Write-Host "Caching local vision model..." -ForegroundColor Cyan
 & ollama pull moondream:1.8b
 if ($LASTEXITCODE -ne 0) { throw "Vision model download failed." }
+
+Write-Host "Installing local OCR engine..." -ForegroundColor Cyan
+$winget = Get-Command winget -ErrorAction SilentlyContinue
+if (-not $winget) { throw "Windows Package Manager is required to install the local OCR engine." }
+& winget install --id UB-Mannheim.TesseractOCR -e --accept-package-agreements --accept-source-agreements
+if ($LASTEXITCODE -ne 0) {
+    $tesseractExisting = Get-Command tesseract -ErrorAction SilentlyContinue
+    if (-not $tesseractExisting -and -not (Test-Path "C:\Program Files\Tesseract-OCR\tesseract.exe")) { throw "Tesseract installation failed." }
+}
+$tessdataDir = Join-Path $PSScriptRoot "models\tesseract\tessdata"
+New-Item -ItemType Directory -Force -Path $tessdataDir | Out-Null
+foreach ($lang in @("eng", "tel")) {
+    $langPath = Join-Path $tessdataDir ($lang + ".traineddata")
+    if (-not (Test-Path $langPath)) {
+        Invoke-WebRequest -Uri ("https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/" + $lang + ".traineddata") -OutFile $langPath -UseBasicParsing
+    }
+    if ((Get-Item $langPath).Length -lt 100000) { throw "OCR language model $lang looks incomplete." }
+}
 
 Write-Host "Verifying both offline neural voices can synthesize audio..." -ForegroundColor Cyan
 & $venvPython (Join-Path $PSScriptRoot "scripts\verify_voice_assets.py")
