@@ -5,6 +5,7 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 
 @dataclass
@@ -21,8 +22,11 @@ class OllamaError(RuntimeError):
 def _ollama_url(path: str) -> str:
     # Never accept a remote host: all inference must remain on this machine.
     host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
-    if not host.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]")):
+    parsed = urlsplit(host)
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise OllamaError("OLLAMA_HOST must point to localhost for offline privacy.")
+    if parsed.username or parsed.password:
+        raise OllamaError("OLLAMA_HOST must not contain credentials.")
     return host + path
 
 
