@@ -1,60 +1,81 @@
 # AI Glasses
 
-A local-first smart-glasses prototype for a school exhibition. The Windows laptop is the AI host; the ESP32-S3 camera/microphone board is planned but not yet purchased or verified.
+A local-first smart-glasses prototype for a school exhibition. The Windows laptop is the AI host; the candidate physical controller is the Seeed XIAO ESP32-S3 Sense. The board has not been confirmed as purchased or physically tested.
 
-## Honest feature status
+## Included in this repository
 
-- [x] Dashboard scaffold and local SQLite memory CRUD
-- [x] Local Ollama API client with local-host restriction
-- [x] Primary/fallback local model selection and keyword memory retrieval
-- [x] Windows setup/launch scripts
-- [ ] Install and benchmark Ollama models on the actual laptop
-- [ ] Offline English/Telugu speech recognition and wake word
-- [ ] Offline text-to-speech
-- [ ] Local vision and OCR
-- [ ] ESP32-S3 firmware, camera/microphone transport, physical privacy switch
-- [ ] Authenticated phone dashboard
-- [ ] Full offline and physical-device tests
-
-Unchecked items are not working features. Code committed does not mean tested on the target laptop.
+- Futuristic dark/cyan local dashboard
+- Local Ollama text assistant with primary and fallback models
+- SQLite useful-fact memory and opt-in short conversation summaries
+- Offline multilingual Whisper transcription adapter and cached-model setup
+- Offline Windows voice output via installed SAPI voices, with eSpeak NG fallback
+- Local vision adapter for an explicitly supplied image
+- Dashboard camera enable/disable control, default off
+- Device API with pairing token, camera command queue, and one-shot JPEG upload
+- Candidate ESP32-S3 camera, privacy-switch, indicator, and microphone firmware
+- Configurable wake phrase and local audio chunk processing
+- Local-only mode and optional PIN-protected LAN dashboard mode
+- Unit tests and GitHub Actions checks
 
 ## Requirements
 
 - Windows 11
 - Python 3.11
-- Internet during initial dependency/model downloads
-- Ollama for local LLM answers
+- Internet for first-time dependencies and model caching
+- Ollama
+- For physical glasses: compatible ESP32-S3 camera/microphone board, USB cable, switch, indicator LED and resistor, safe mounting, and wiring verified for the exact board revision
 
 ## Setup
 
-In PowerShell, from the repository folder:
+From PowerShell in the repository directory:
 
     Set-ExecutionPolicy -Scope Process Bypass
     .\setup.ps1
 
-The setup script installs Python dependencies, offers to install Ollama, and asks before downloading the primary and fallback models. Downloads may take time and several GB. After setup finishes:
+Setup creates the Python environment, installs dependencies, creates a private dashboard PIN and device pairing token, and offers to cache local speech and Ollama models. Keep the PIN and token private. If Ollama was installed during setup but is not available in the current shell, reopen PowerShell and rerun setup to finish model caching.
+
+For laptop-only mode:
 
     .\launch.ps1
 
-Open http://127.0.0.1:8765. Questions are processed through local Ollama only; no cloud model endpoint is used. Before testing offline, cache both models and verify with ollama list, then disconnect internet and test.
+Open http://127.0.0.1:8765.
 
-## Security and privacy
+For phone access on a trusted private Wi-Fi network:
 
-- The dashboard binds to localhost only.
-- Do not expose the dashboard to Wi-Fi until authentication and access controls are implemented.
-- SQLite data stays on this laptop in the data folder.
-- Do not commit conversation memory, recordings, photos, model files, API keys, or other secrets.
-- Raw audio recording is not implemented and must remain off by default.
-- Camera capture and the physical privacy switch are not implemented yet.
-- This repository may be public. Use GitHub Settings > General > Danger Zone > Change repository visibility > Private if you want it restricted.
+    .\launch-lan.ps1
 
-## Layout
+Find the laptop IPv4 address using ipconfig, then open http://LAPTOP-IP:8765 on the phone. Enter the generated dashboard PIN. Do not use public/shared Wi-Fi; this prototype's device protocol uses HTTP on the trusted LAN.
 
-- laptop/app.py: dashboard and API
-- laptop/assistant/ollama_client.py: local model client
-- laptop/memory/store.py: local memory retrieval
-- setup.ps1, launch.ps1: Windows scripts
-- docs/: architecture, privacy, hardware, model setup, and test plan
-- firmware/: reserved for ESP32-S3 firmware
+## Models
 
-Label features as implemented, tested on laptop, or tested with physical glasses. Hardware and offline claims require actual tests.
+- Text primary: qwen2.5:1.5b
+- Text fallback: qwen2.5:0.5b
+- Speech: faster-whisper base multilingual model
+- Vision candidate: moondream:1.8b
+
+These are configuration candidates. Actual model latency, memory pressure, Telugu recognition quality, and voice availability must be verified on the target laptop. The app never downloads models while answering a question.
+
+## Privacy defaults
+
+- Dashboard camera control starts disabled.
+- Capture requires a visual question, dashboard camera control enabled, a connected device, and the physical switch enabled.
+- Firmware turns on the capture indicator while obtaining a frame and stops the camera driver when the dashboard control or physical switch disables it.
+- Microphone audio is sent in short chunks to the laptop for local processing. Temporary WAV files are deleted after processing; recognized transcripts are not saved unless the user explicitly asks to save a summary.
+- Memory is local and can be inspected or cleared.
+- The dashboard is localhost-only by default. LAN mode requires the generated PIN.
+- Device credentials, PINs, local memory, recordings, and model files are excluded from Git.
+
+A firmware-controlled switch is not an electrical camera power disconnect. Review the wiring with a qualified adult/technician before assembly. Do not improvise lithium battery or charging circuits.
+
+## Tests and status
+
+Run Python checks with:
+
+    .\.venv\Scripts\python.exe -m compileall laptop tests
+    .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+
+Firmware compile check:
+
+    pio run -d firmware/xiao-esp32s3-sense
+
+Committed code and CI checks do not certify that the selected board works physically. Do not claim the full offline demo is verified until it has been rehearsed with the internet disconnected and the exact hardware.
