@@ -36,13 +36,13 @@ From PowerShell in the repository directory:
 
 Setup creates the Python environment, installs dependencies, creates a private dashboard PIN and device pairing token, and offers to cache local speech and Ollama models. Keep the PIN and token private. If Ollama was installed during setup but is not available in the current shell, reopen PowerShell and rerun setup to finish model caching.
 
-For an existing setup, install and verify the British voice without repeating all model downloads:
+For an existing setup, install and verify the offline male English and Telugu voices without repeating all model downloads:
 
     powershell -ExecutionPolicy Bypass -File .\scripts\install_british_voice.ps1
 
 ### Offline speech
 
-Speech uses installed Windows voices through Windows SAPI. It requires no API key, subscription, or cloud TTS service. Voice quality and available languages depend on the voices installed in Windows. The app does not call Gemini or Fish Audio for speech.
+Speech uses cached Piper neural voices: male Alan for British English and the male Venkatesh voice for Telugu. Speech generation runs locally and requires no API key, subscription, or cloud TTS service. English can fall back to an installed Windows voice if Piper is unavailable; Telugu intentionally reports a failure rather than mispronouncing Telugu through an English voice.
 
 For laptop-only mode:
 
@@ -63,7 +63,7 @@ Find the laptop IPv4 address using ipconfig, then open http://LAPTOP-IP:8765 on 
 - Speech: faster-whisper base multilingual model
 - Vision candidate: moondream:1.8b
 - OCR: local Tesseract with eng+tel data
-- TTS: Piper en_GB-alan-medium British English and te_IN-maya-medium Telugu voices
+- TTS: Piper en_GB-alan-medium British English and te_IN-venkatesh-medium Telugu voices
 
 These are configuration candidates. Actual model latency, memory pressure, Telugu recognition quality, and voice availability must be verified on the target laptop. The app never downloads models while answering a question.
 
