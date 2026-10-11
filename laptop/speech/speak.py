@@ -26,7 +26,7 @@ def _is_telugu(text: str) -> bool:
 
 def _speak_with_piper(text: str) -> dict | None:
     """Prefer cached neural voices so both English and Telugu work offline."""
-    voice_key = "te_IN-maya-medium" if _is_telugu(text) else "en_US-lessac-medium"
+    voice_key = "te_IN-maya-medium" if _is_telugu(text) else "en_GB-alan-medium"
     model_path = VOICE_DIR / f"{voice_key}.onnx"
     config_path = VOICE_DIR / f"{voice_key}.onnx.json"
     if not model_path.is_file() or not config_path.is_file():
