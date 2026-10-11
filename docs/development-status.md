@@ -2,35 +2,28 @@
 
 This file distinguishes committed code from tested behavior.
 
-## Committed code
-- Dashboard UI and local API
-- SQLite memory create/list/delete/clear
-- Local Ollama client restricted to loopback hosts
-- Primary/fallback local text model attempts
-- Keyword-based retrieval of relevant saved memory
-- Windows setup/launch scripts with optional model caching
-- Offline speech transcription adapter using a cached faster-whisper model
-- Best-effort local eSpeak NG speech-output adapter
-- Local Ollama image-question adapter for an explicitly supplied frame
-- Unit tests for memory retrieval and Ollama client
+## Implemented in source
+- Local dashboard and API with localhost default and PIN-protected opt-in LAN mode
+- SQLite memory save/list/delete/clear
+- Privacy-first opt-in short summaries rather than full transcript persistence
+- Local Ollama client with strict loopback-host validation and smaller fallback model
+- Local multilingual Whisper adapter with cached model reuse
+- Offline Windows SAPI/eSpeak speech output adapter
+- Local vision adapter for explicit image input
+- Explicit device capture queue and JPEG upload endpoint
+- Configurable wake phrase, audio chunk transcription, question collection, local inference, and speech output
+- Dashboard camera control default-off, plus physical-switch check in candidate firmware
+- Candidate XIAO ESP32-S3 Sense camera and PDM microphone firmware
+- Python unit tests and GitHub Actions workflows
 
-## Not verified on the target Windows laptop
-- Python dependency installation
-- Ollama installation and model availability
-- Speech/vision model caching
-- Local model latency and RAM consumption
-- Memory persistence under repeated restarts
-- Offline operation with internet disconnected
-- Telugu voice quality and speech-recognition accuracy
+## Still requires target-machine/hardware validation
+- Windows dependency/model installation and RAM/latency benchmark
+- Confirm actual Whisper model cache works without internet
+- Confirm the installed voice can speak the user's English and Telugu naturally
+- Compile candidate firmware against the exact ESP32-S3 board revision
+- Confirm the actual camera and microphone pin maps
+- Confirm switch and indicator wiring with the device unpowered before assembly
+- Live camera, audio, wake phrase, and answer loop over local Wi-Fi
+- Offline rehearsal repeated at least three times
 
-## Not yet integrated end-to-end
-- Always-listening microphone loop and custom wake-word detection
-- Audio stream from the actual glasses microphone into speech recognition
-- Speech output control from the assistant response
-- Camera capture request from the glasses board into the vision adapter
-- ESP32-S3 firmware, Wi-Fi pairing, and transport protocol
-- Hardware-enforced camera privacy switch and capture indicator
-- Authenticated phone dashboard and local memory PIN
-- Full offline and physical-device tests
-
-Do not mark a feature as complete based only on a committed file. Update this checklist after the corresponding test has actually passed.
+No unchecked physical-validation item should be described as tested. A code file, mocked unit test, or CI build is not evidence of successful physical hardware operation.
