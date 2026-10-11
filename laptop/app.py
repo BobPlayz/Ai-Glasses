@@ -42,6 +42,7 @@ _dashboard_camera_enabled = False
 _voice_armed = False
 _voice_question_parts: list[str] = []
 _voice_last_event: dict = {"state": "idle", "detail": "No device audio received yet."}
+_last_indicator_on_at: str | None = None
 
 
 def connect_db() -> sqlite3.Connection:
@@ -202,6 +203,8 @@ def status() -> dict:
         "voice_state": _voice_last_event.get("state", "idle"),
         "voice_question": _voice_last_event.get("question", ""),
         "voice_answer": _voice_last_event.get("answer", ""),
+        "voice_ocr_text": _voice_last_event.get("ocr_text", ""),
+        "last_indicator_on_at": _last_indicator_on_at or "no capture indicator event yet",
         "privacy_indicator": "on" if _last_device_status.get("indicator_on") else "off / not verified",
         "memory": "local SQLite enabled",
         "network_dashboard": "PIN protected" if dashboard_pin_required() else "localhost mode",
@@ -416,6 +419,7 @@ async def device_audio(request: Request) -> dict:
                 "detail": f"Visual question answered using {visual['model']}.",
                 "question": question,
                 "answer": visual["answer"],
+                "ocr_text": visual.get("ocr_text", ""),
             }
             return {
                 "state": "answered_visual",
@@ -469,10 +473,12 @@ def camera_control(payload: CameraControlInput) -> dict:
 
 @app.post("/api/device/status", dependencies=[Depends(verify_device_token)])
 def device_status(payload: DeviceStatusInput) -> dict:
-    global _last_device_status
+    global _last_device_status, _last_indicator_on_at
     # The board firmware must only report camera_enabled after checking its physical switch.
     _last_device_status = payload.model_dump()
     _last_device_status["updated_at"] = time.time()
+    if payload.indicator_on:
+        _last_indicator_on_at = datetime.now(timezone.utc).isoformat()
     return {"accepted": True}
 
 
