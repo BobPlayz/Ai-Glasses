@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "esp_camera.h"
+#include "driver/i2s.h"
 #include "secrets.h"
 
 // Candidate firmware for Seeed XIAO ESP32-S3 Sense.
@@ -12,11 +13,15 @@ static constexpr int CAMERA_INDICATOR_PIN = 21; // external LED + resistor
 static constexpr unsigned long STATUS_INTERVAL_MS = 2000;
 static constexpr unsigned long COMMAND_INTERVAL_MS = 300;
 static constexpr size_t MAX_JPEG_BYTES = 8 * 1024 * 1024;
+static constexpr uint32_t MIC_SAMPLE_RATE = 16000;
+static constexpr size_t MIC_SAMPLES = 16000; // one second, mono, 16-bit PCM
 
 static unsigned long lastStatus = 0;
 static unsigned long lastCommand = 0;
 static bool cameraReady = false;
 static bool indicatorOn = false;
+static bool microphoneReady = false;
+static int16_t* microphoneSamples = nullptr;
 
 bool privacySwitchEnabled() {
   return digitalRead(PRIVACY_SWITCH_PIN) == LOW;
@@ -69,6 +74,110 @@ bool initCamera() {
   return true;
 }
 
+bool initMicrophone() {
+  i2s_config_t config = {};
+  config.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM);
+  config.sample_rate = MIC_SAMPLE_RATE;
+  config.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+  config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+  config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+  config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+  config.dma_buf_count = 6;
+  config.dma_buf_len = 512;
+  config.use_apll = false;
+  config.tx_desc_auto_clear = false;
+  config.fixed_mclk = 0;
+
+  esp_err_t err = i2s_driver_install(I2S_NUM_0, &config, 0, nullptr);
+  if (err != ESP_OK) {
+    Serial.printf("Microphone I2S install failed: 0x%x\\n", err);
+    return false;
+  }
+  i2s_pin_config_t pins = {};
+  pins.bck_io_num = 41; // candidate onboard PDM microphone clock
+  pins.ws_io_num = -1;
+  pins.data_out_num = -1;
+  pins.data_in_num = 42; // candidate onboard PDM microphone data
+  err = i2s_set_pin(I2S_NUM_0, &pins);
+  if (err != ESP_OK) {
+    Serial.printf("Microphone pin setup failed: 0x%x\\n", err);
+    i2s_driver_uninstall(I2S_NUM_0);
+    return false;
+  }
+  microphoneSamples = static_cast<int16_t*>(ps_malloc(MIC_SAMPLES * sizeof(int16_t)));
+  if (!microphoneSamples) microphoneSamples = static_cast<int16_t*>(malloc(MIC_SAMPLES * sizeof(int16_t)));
+  if (!microphoneSamples) {
+    i2s_driver_uninstall(I2S_NUM_0);
+    return false;
+  }
+  return true;
+}
+
+void writeLe16(uint8_t* out, uint16_t value) {
+  out[0] = value & 0xff;
+  out[1] = (value >> 8) & 0xff;
+}
+
+void writeLe32(uint8_t* out, uint32_t value) {
+  out[0] = value & 0xff;
+  out[1] = (value >> 8) & 0xff;
+  out[2] = (value >> 16) & 0xff;
+  out[3] = (value >> 24) & 0xff;
+}
+
+bool sendMicrophoneChunk() {
+  if (!microphoneReady || WiFi.status() != WL_CONNECTED || !microphoneSamples) return false;
+  size_t filled = 0;
+  const size_t targetBytes = MIC_SAMPLES * sizeof(int16_t);
+  while (filled < targetBytes) {
+    size_t bytesRead = 0;
+    esp_err_t err = i2s_read(I2S_NUM_0,
+      reinterpret_cast<uint8_t*>(microphoneSamples) + filled,
+      targetBytes - filled, &bytesRead, pdMS_TO_TICKS(1200));
+    if (err != ESP_OK || bytesRead == 0) return false;
+    filled += bytesRead;
+  }
+
+  const size_t wavSize = 44 + targetBytes;
+  uint8_t* wav = static_cast<uint8_t*>(malloc(wavSize));
+  if (!wav) return false;
+  memcpy(wav, "RIFF", 4);
+  writeLe32(wav + 4, static_cast<uint32_t>(wavSize - 8));
+  memcpy(wav + 8, "WAVEfmt ", 8);
+  writeLe32(wav + 16, 16);
+  writeLe16(wav + 20, 1);
+  writeLe16(wav + 22, 1);
+  writeLe32(wav + 24, MIC_SAMPLE_RATE);
+  writeLe32(wav + 28, MIC_SAMPLE_RATE * 2);
+  writeLe16(wav + 32, 2);
+  writeLe16(wav + 34, 16);
+  memcpy(wav + 36, "data", 4);
+  writeLe32(wav + 40, static_cast<uint32_t>(targetBytes));
+  memcpy(wav + 44, microphoneSamples, targetBytes);
+
+  HTTPClient http;
+  http.begin(apiUrl("/api/device/audio"));
+  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+  http.addHeader("Content-Type", "audio/wav");
+  http.setTimeout(45000);
+  int code = http.POST(wav, wavSize);
+  String response = code > 0 ? http.getString() : "";
+  http.end();
+  free(wav);
+  if (code == 200) {
+    JsonDocument doc;
+    if (deserializeJson(doc, response) == DeserializationError::Ok) {
+      const char* state = doc["state"] | "unknown";
+      Serial.printf("Voice state: %s\\n", state);
+      if (doc["wake_detected"] == true) Serial.println("Wake phrase detected. Ask your question in the next audio chunk.");
+      if (doc["answer"].is<const char*>()) Serial.printf("Assistant: %s\\n", doc["answer"].as<const char*>());
+    }
+    return true;
+  }
+  Serial.printf("Microphone upload returned HTTP %d\\n", code);
+  return false;
+}
+
 bool postStatus() {
   if (WiFi.status() != WL_CONNECTED) return false;
   HTTPClient http;
@@ -81,7 +190,7 @@ bool postStatus() {
   doc["camera_enabled"] = cameraReady && privacySwitchEnabled();
   doc["privacy_switch_enabled"] = privacySwitchEnabled();
   doc["indicator_on"] = indicatorOn;
-  doc["microphone_ready"] = false;
+  doc["microphone_ready"] = microphoneReady;
   doc["firmware_version"] = "0.1-candidate";
   String body;
   serializeJson(doc, body);
@@ -182,6 +291,8 @@ void setup() {
   } else {
     Serial.println("Privacy switch is off; camera left uninitialised.");
   }
+  microphoneReady = initMicrophone();
+  Serial.printf("Microphone: %s\\n", microphoneReady ? "ready" : "unavailable");
   postStatus();
 }
 
@@ -213,5 +324,7 @@ void loop() {
     lastCommand = now;
     if (privacySwitchEnabled() && cameraReady) checkCommand();
   }
-  delay(10);
+  // Audio is sent as short WAV chunks. The server processes it locally in RAM
+  // and deletes temporary files immediately; the firmware never stores audio.
+  sendMicrophoneChunk();
 }
