@@ -84,9 +84,10 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
     if parsed.username or parsed.password:
         raise VisionError("OLLAMA_HOST must not contain credentials.")
     model = os.environ.get("GLASSES_VISION_MODEL", "moondream:1.8b")
-    prompt = question + " Answer in the language used by the user. If visual details or text are unclear, say so."
-    if ocr_text:
-        prompt += "\n\nSeparate offline OCR result (may contain mistakes; do not invent corrections):\n" + ocr_text
+    # Keep the vision prompt short. Moondream can return an empty message when
+    # a long OCR transcript is appended to the image question; OCR is returned
+    # separately to the caller instead of being fed back into vision inference.
+    prompt = question
     payload = {
         "model": model,
         "stream": False,
@@ -142,7 +143,7 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
             answer = ""
     if not answer and ocr_text:
-        answer = "I couldn't describe the image reliably, but I could read this text: " + ocr_text
+        answer = "I couldn't describe the image reliably. Offline OCR found this text: " + ocr_text
         return {
             "answer": answer,
             "ocr_text": ocr_text,
