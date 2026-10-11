@@ -55,6 +55,11 @@ if ($ollama) {
     } else {
         Write-Host "Model downloads skipped. Local answers remain unavailable until models are cached." -ForegroundColor Yellow
     }
+    $pullVision = Read-Host "Also download the candidate vision model moondream:1.8b? It may use substantial RAM during vision tasks (Y/N)"
+    if ($pullVision -match "^[Yy]$") {
+        & ollama pull moondream:1.8b
+        if ($LASTEXITCODE -ne 0) { Write-Host "Vision model download failed; text model setup is still usable." -ForegroundColor Yellow }
+    }
 } else {
     Write-Host "Ollama not installed. Dashboard can open, but local AI answers will not work yet." -ForegroundColor Yellow
 }
