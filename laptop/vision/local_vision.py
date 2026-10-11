@@ -62,6 +62,20 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
     question = question.strip() or "Describe the main visible objects and any readable text."
     ocr_text = extract_text_local(image_bytes)
 
+    # Phone cameras often send 12 MP+ frames. Keep OCR on the original image,
+    # but give the vision model a bounded JPEG to reduce CPU time and memory use.
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            image = source.convert("RGB")
+            image.thumbnail((1280, 1280))
+            optimized = io.BytesIO()
+            image.save(optimized, format="JPEG", quality=85, optimize=True)
+            vision_image_bytes = optimized.getvalue()
+    except Exception as exc:
+        raise VisionError("Could not decode the captured image. Try another phone snapshot.") from exc
+
     host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
     from urllib.parse import urlsplit
     parsed = urlsplit(host)
@@ -80,7 +94,7 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
         "messages": [{
             "role": "user",
             "content": prompt,
-            "images": [base64.b64encode(image_bytes).decode("ascii")],
+            "images": [base64.b64encode(vision_image_bytes).decode("ascii")],
         }],
         "options": {"temperature": 0.1, "num_ctx": 2048},
     }
@@ -97,7 +111,7 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
         detail = exc.read().decode("utf-8", errors="replace")[:400]
         raise VisionError(f"Local vision model error HTTP {exc.code}: {detail}") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise VisionError("Local vision service is unavailable or timed out.") from exc
+        raise VisionError(f"Could not complete local vision request ({type(exc).__name__}: {exc}). Check that Ollama is running and try again.") from exc
     except json.JSONDecodeError as exc:
         raise VisionError("Local vision service returned invalid JSON.") from exc
     answer = result.get("message", {}).get("content", "").strip()
@@ -111,7 +125,7 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
             "messages": [{
                 "role": "user",
                 "content": "Describe this image briefly. Read visible text if possible.",
-                "images": [base64.b64encode(image_bytes).decode("ascii")],
+                "images": [base64.b64encode(vision_image_bytes).decode("ascii")],
             }],
             "options": {"temperature": 0.1, "num_ctx": 2048},
         }
