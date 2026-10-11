@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import tempfile
@@ -24,8 +23,59 @@ def _is_telugu(text: str) -> bool:
     return any("\u0c00" <= char <= "\u0c7f" for char in text)
 
 
+def _speak_with_kokoro(text: str) -> dict | None:
+    """Use Kokoro's more expressive British voice for English when installed and cached."""
+    if _is_telugu(text):
+        return None
+    try:
+        import numpy as np
+        import soundfile as sf
+        import winsound
+        from kokoro import KPipeline
+
+        # 'b' selects Kokoro's British-English pipeline; bm_george is a calm
+        # British male voice. Keep the pipeline resident to avoid reload delays.
+        with _voice_lock:
+            pipeline = _voice_cache.get("kokoro-b")
+            if pipeline is None:
+                pipeline = KPipeline(lang_code="b")
+                _voice_cache["kokoro-b"] = pipeline
+
+        chunks = []
+        with _synthesis_lock:
+            for _graphemes, _phonemes, audio in pipeline(
+                text[:1200],
+                voice="bm_george",
+                speed=0.94,
+                split_pattern=r"\n+",
+            ):
+                if audio is not None and len(audio):
+                    chunks.append(np.asarray(audio, dtype=np.float32))
+            if not chunks:
+                return None
+
+            audio = np.concatenate(chunks)
+            with tempfile.NamedTemporaryFile(prefix="glasses-kokoro-", suffix=".wav", delete=False) as temp:
+                output_path = Path(temp.name)
+            try:
+                sf.write(str(output_path), audio, 24000, subtype="PCM_16")
+                winsound.PlaySound(str(output_path), winsound.SND_FILENAME)
+            finally:
+                output_path.unlink(missing_ok=True)
+
+        return {
+            "spoken": True,
+            "engine": "Kokoro neural TTS",
+            "voice": "bm_george (British English)",
+            "offline": True,
+        }
+    except Exception:
+        # Never break the glasses if Kokoro isn't installed or its assets aren't cached.
+        return None
+
+
 def _speak_with_piper(text: str) -> dict | None:
-    """Prefer cached neural voices so both English and Telugu work offline."""
+    """Offline fallback for English and Telugu."""
     voice_key = "te_IN-maya-medium" if _is_telugu(text) else "en_GB-alan-medium"
     model_path = VOICE_DIR / f"{voice_key}.onnx"
     config_path = VOICE_DIR / f"{voice_key}.onnx.json"
@@ -62,16 +112,19 @@ def _speak_with_piper(text: str) -> dict | None:
 
 
 def speak_local(text: str) -> dict:
-    """Speak using cached offline neural voices; use installed offline voices as fallback."""
+    """Prefer Kokoro for natural English, retaining Piper for Telugu and offline fallback."""
     text = text.strip()
     if not text:
         return {"spoken": False, "reason": "empty_text"}
+
+    kokoro_result = _speak_with_kokoro(text)
+    if kokoro_result:
+        return kokoro_result
 
     piper_result = _speak_with_piper(text)
     if piper_result:
         return piper_result
 
-    # Windows SAPI is an offline fallback when Piper voice assets are unavailable.
     try:
         import pyttsx3
         with _voice_lock:
@@ -94,7 +147,7 @@ def speak_local(text: str) -> dict:
                         break
             if chosen is not None:
                 engine.setProperty("voice", chosen.id)
-            engine.setProperty("rate", 185)
+            engine.setProperty("rate", 175)
             engine.say(text[:1200])
             engine.runAndWait()
             engine.stop()
