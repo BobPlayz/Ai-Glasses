@@ -40,9 +40,9 @@ For an existing setup, install and verify the British voice without repeating al
 
     powershell -ExecutionPolicy Bypass -File .\scripts\install_british_voice.ps1
 
-### Optional: Fish Audio reference voice
+### Offline speech
 
-English speech can use the selected Fish Audio voice online. Create an API key in your Fish Audio account, then save only the key (no quotes) in a local file named `.fish-audio-key` in the repository root, or set the `FISH_AUDIO_API_KEY` environment variable. The chosen voice ID is already configured in `laptop/speech/speak.py`. The key file is ignored by Git and must never be committed. Fish Audio needs internet and account quota; Telugu speech stays on the offline Piper voice. If Fish Audio is unavailable, the app falls back to its local English voice when available.
+Speech uses installed Windows voices through Windows SAPI. It requires no API key, subscription, or cloud TTS service. Voice quality and available languages depend on the voices installed in Windows. The app does not call Gemini or Fish Audio for speech.
 
 For laptop-only mode:
 
