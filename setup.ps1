@@ -20,6 +20,23 @@ if ($LASTEXITCODE -ne 0) { throw "Python dependency installation failed." }
 New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot "data") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot "models") | Out-Null
 
+# Generate local secrets once. These files are excluded from Git.
+$pinPath = Join-Path $PSScriptRoot ".dashboard-pin"
+if (-not (Test-Path $pinPath)) {
+    $pin = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 16 | ForEach-Object { [char]$_ })
+    Set-Content -Path $pinPath -Value $pin -NoNewline
+    Write-Host "Created local dashboard PIN: $pin" -ForegroundColor Yellow
+    Write-Host "Save it privately. It is not committed to Git." -ForegroundColor Yellow
+}
+$deviceTokenPath = Join-Path $PSScriptRoot ".device-token"
+if (-not (Test-Path $deviceTokenPath)) {
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+    Set-Content -Path $deviceTokenPath -Value $token -NoNewline
+    Write-Host "Created local device pairing token in .device-token. Copy it only into your private firmware secrets file." -ForegroundColor Yellow
+}
+
 $ollama = Get-Command ollama -ErrorAction SilentlyContinue
 if (-not $ollama) {
     Write-Host "Ollama is required for local language-model answers." -ForegroundColor Yellow
