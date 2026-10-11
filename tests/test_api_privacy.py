@@ -97,9 +97,9 @@ class DevicePrivacyApiTests(unittest.TestCase):
 
     def test_lan_dashboard_mutation_requires_pin(self):
         os.environ["GLASSES_LAN_MODE"] = "1"
+        glasses_app.PIN_PATH.write_text("test-pin", encoding="utf-8")
         missing_pin = self.client.post("/api/microphone/control", json={"enabled": True})
         self.assertEqual(missing_pin.status_code, 401)
-        glasses_app.PIN_PATH.write_text("test-pin", encoding="utf-8")
         valid_pin = self.client.post(
             "/api/microphone/control",
             headers={"X-Dashboard-Pin": "test-pin"},
