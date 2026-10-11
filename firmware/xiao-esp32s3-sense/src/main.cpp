@@ -95,7 +95,7 @@ bool initMicrophone() {
 
   esp_err_t err = i2s_driver_install(I2S_NUM_0, &config, 0, nullptr);
   if (err != ESP_OK) {
-    Serial.printf("Microphone I2S install failed: 0x%x\\n", err);
+    Serial.printf("Microphone I2S install failed: 0x%x\n", err);
     return false;
   }
   i2s_pin_config_t pins = {};
@@ -105,7 +105,7 @@ bool initMicrophone() {
   pins.data_in_num = 42; // candidate onboard PDM microphone data
   err = i2s_set_pin(I2S_NUM_0, &pins);
   if (err != ESP_OK) {
-    Serial.printf("Microphone pin setup failed: 0x%x\\n", err);
+    Serial.printf("Microphone pin setup failed: 0x%x\n", err);
     i2s_driver_uninstall(I2S_NUM_0);
     return false;
   }
@@ -173,13 +173,13 @@ bool sendMicrophoneChunk() {
     JsonDocument doc;
     if (deserializeJson(doc, response) == DeserializationError::Ok) {
       const char* state = doc["state"] | "unknown";
-      Serial.printf("Voice state: %s\\n", state);
+      Serial.printf("Voice state: %s\n", state);
       if (doc["wake_detected"] == true) Serial.println("Wake phrase detected. Ask your question in the next audio chunk.");
-      if (doc["answer"].is<const char*>()) Serial.printf("Assistant: %s\\n", doc["answer"].as<const char*>());
+      if (doc["answer"].is<const char*>()) Serial.printf("Assistant: %s\n", doc["answer"].as<const char*>());
     }
     return true;
   }
-  Serial.printf("Microphone upload returned HTTP %d\\n", code);
+  Serial.printf("Microphone upload returned HTTP %d\n", code);
   return false;
 }
 
@@ -313,7 +313,7 @@ void setup() {
   // switch allow it. The server sends camera_allowed=false by default.
   Serial.println("Camera is disabled until dashboard control and physical switch allow it.");
   microphoneReady = initMicrophone();
-  Serial.printf("Microphone: %s\\n", microphoneReady ? "ready" : "unavailable");
+  Serial.printf("Microphone: %s\n", microphoneReady ? "ready" : "unavailable");
   postStatus();
   if (microphoneReady) {
     xTaskCreatePinnedToCore(microphoneTask, "glasses-mic", 8192, nullptr, 1, nullptr, 0);
