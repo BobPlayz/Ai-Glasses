@@ -12,6 +12,7 @@ A local-first smart-glasses prototype for a school exhibition. The Windows lapto
 - Local Tesseract OCR using English and Telugu language data
 - Local vision adapter for an explicitly supplied image, combined with OCR results
 - Dashboard camera enable/disable control, default off
+- Explicit device microphone enable/disable control, default off, with server-side upload rejection until opted in
 - Device API with pairing token, camera command queue, and one-shot JPEG upload
 - Candidate ESP32-S3 camera, privacy-switch, indicator, and microphone firmware
 - Configurable wake phrase and local audio chunk processing
@@ -72,7 +73,7 @@ These are configuration candidates. Actual model latency, memory pressure, Telug
 - Dashboard camera control starts disabled.
 - Capture requires a visual question, dashboard camera control enabled, a connected device, and the physical switch enabled.
 - Firmware turns on the capture indicator while obtaining a frame and stops the camera driver when the dashboard control or physical switch disables it.
-- Microphone audio is sent in short chunks to the laptop for local processing. Temporary WAV files are deleted after processing; recognized transcripts are not saved unless the user explicitly asks to save a summary.
+- Device microphone is disabled by default. Audio capture/upload starts only after explicit dashboard opt-in; the laptop server rejects device audio while disabled, and firmware stops reading/uploading when the permission is revoked. When enabled, short audio chunks are sent to this laptop for local processing. Temporary WAV files are deleted after processing; recognized transcripts are not saved unless the user explicitly asks to save a summary.
 - Memory is local and can be inspected or cleared.
 - The dashboard is localhost-only by default. LAN mode requires the generated PIN.
 - Device credentials, PINs, local memory, recordings, and model files are excluded from Git.
@@ -85,6 +86,8 @@ Run Python checks with:
 
     .\.venv\Scripts\python.exe -m compileall laptop tests
     .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+
+The API privacy tests cover default-off camera/microphone permissions, microphone upload rejection, dashboard opt-in/revocation, and device-token enforcement.
 
 Firmware compile check:
 
