@@ -97,6 +97,8 @@ if ($LASTEXITCODE -ne 0) {
     $tesseractExisting = Get-Command tesseract -ErrorAction SilentlyContinue
     if (-not $tesseractExisting -and -not (Test-Path "C:\Program Files\Tesseract-OCR\tesseract.exe")) { throw "Tesseract installation failed." }
 }
+$tesseractExisting = Get-Command tesseract -ErrorAction SilentlyContinue
+if (-not $tesseractExisting -and -not (Test-Path "C:\Program Files\Tesseract-OCR\tesseract.exe")) { throw "Tesseract binary is missing after installation." }
 $tessdataDir = Join-Path $PSScriptRoot "models\tesseract\tessdata"
 New-Item -ItemType Directory -Force -Path $tessdataDir | Out-Null
 foreach ($lang in @("eng", "tel")) {
