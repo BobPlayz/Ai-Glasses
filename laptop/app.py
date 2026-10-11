@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
@@ -135,7 +136,14 @@ def current_wake_phrase() -> str:
 
 
 def normalize_speech(text: str) -> str:
-    return " ".join(re.sub(r"[^\w\s]", " ", text.casefold(), flags=re.UNICODE).split())
+    cleaned = []
+    for character in text.casefold():
+        category = unicodedata.category(character)
+        if character.isspace() or category[0] in {"L", "M", "N"}:
+            cleaned.append(character)
+        else:
+            cleaned.append(" ")
+    return " ".join("".join(cleaned).split())
 
 
 def is_visual_question(text: str) -> bool:
