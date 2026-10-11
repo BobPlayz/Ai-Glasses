@@ -60,6 +60,24 @@ $env:GLASSES_MODEL_CACHE = Join-Path $PSScriptRoot "models\whisper"
 & $venvPython -c "from faster_whisper import WhisperModel; import os; WhisperModel('base', device='cpu', compute_type='int8', download_root=os.environ['GLASSES_MODEL_CACHE'])"
 if ($LASTEXITCODE -ne 0) { throw "Whisper model download failed. Fix the connection and rerun setup." }
 
+Write-Host "Caching offline neural English and Telugu voices..." -ForegroundColor Cyan
+$ttsDir = Join-Path $PSScriptRoot "models\tts"
+New-Item -ItemType Directory -Force -Path $ttsDir | Out-Null
+$voiceFiles = @(
+    @{ Name = "en_US-lessac-medium.onnx"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx?download=true" },
+    @{ Name = "en_US-lessac-medium.onnx.json"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json?download=true" },
+    @{ Name = "te_IN-maya-medium.onnx"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/te/te_IN/maya/medium/te_IN-maya-medium.onnx?download=true" },
+    @{ Name = "te_IN-maya-medium.onnx.json"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/te/te_IN/maya/medium/te_IN-maya-medium.onnx.json?download=true" }
+)
+foreach ($voiceFile in $voiceFiles) {
+    $destination = Join-Path $ttsDir $voiceFile.Name
+    if (-not (Test-Path $destination)) {
+        Invoke-WebRequest -Uri $voiceFile.Url -OutFile $destination -UseBasicParsing
+        if ($LASTEXITCODE -ne 0) { throw "Voice download failed: $($voiceFile.Name)" }
+    }
+    if ((Get-Item $destination).Length -lt 1000) { throw "Voice file looks incomplete: $($voiceFile.Name). Delete it and rerun setup." }
+}
+
 Write-Host "Caching local text models..." -ForegroundColor Cyan
 & ollama pull qwen2.5:1.5b
 if ($LASTEXITCODE -ne 0) { throw "Primary language model download failed." }
