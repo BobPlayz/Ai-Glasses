@@ -37,6 +37,7 @@ _capture_lock = asyncio.Lock()
 _capture_request: dict | None = None
 _last_device_status: dict = {"connected": False}
 _last_frame: dict | None = None
+_dashboard_camera_enabled = False
 _voice_armed = False
 _voice_last_event: dict = {"state": "idle", "detail": "No device audio received yet."}
 
@@ -95,6 +96,10 @@ class CaptureRequest(BaseModel):
 
 class WakePhraseInput(BaseModel):
     phrase: Annotated[str, Field(min_length=3, max_length=80)]
+
+
+class CameraControlInput(BaseModel):
+    enabled: bool
 
 
 def read_secret(path: Path) -> str:
@@ -159,7 +164,8 @@ def status() -> dict:
         "text_to_speech": "local eSpeak NG if installed; text fallback otherwise",
         "vision_ocr": "local Ollama vision adapter; model must be cached",
         "glasses_device": "connected" if _last_device_status.get("connected") and time.time() - _last_device_status.get("updated_at", 0) < 8 else "not connected",
-        "camera": "capture allowed" if _last_device_status.get("camera_enabled") and _last_device_status.get("privacy_switch_enabled") else "capture disabled / unverified",
+        "camera": "capture allowed" if _dashboard_camera_enabled and _last_device_status.get("camera_enabled") and _last_device_status.get("privacy_switch_enabled") else "capture disabled / unverified",
+        "dashboard_camera_enabled": _dashboard_camera_enabled,
         "microphone": "streaming local audio" if _last_device_status.get("microphone_ready") else "not connected",
         "wake_phrase": current_wake_phrase(),
         "voice_state": _voice_last_event.get("state", "idle"),
@@ -376,6 +382,15 @@ async def device_audio(request: Request) -> dict:
     }
 
 
+@app.post("/api/camera/control", dependencies=[Depends(verify_dashboard_pin)])
+def camera_control(payload: CameraControlInput) -> dict:
+    global _dashboard_camera_enabled, _capture_request
+    _dashboard_camera_enabled = payload.enabled
+    if not _dashboard_camera_enabled:
+        _capture_request = None
+    return {"dashboard_camera_enabled": _dashboard_camera_enabled}
+
+
 @app.post("/api/device/status", dependencies=[Depends(verify_device_token)])
 def device_status(payload: DeviceStatusInput) -> dict:
     global _last_device_status
@@ -390,7 +405,7 @@ def device_command() -> dict:
     global _capture_request
     if _capture_request and _capture_request.get("expires_at", 0) < time.time():
         _capture_request = None
-    return {"capture": _capture_request or None}
+    return {"capture": _capture_request or None, "camera_allowed": _dashboard_camera_enabled}
 
 
 @app.post("/api/device/capture-result", dependencies=[Depends(verify_device_token)])
@@ -412,6 +427,8 @@ async def device_capture_result(request_id: str, file: UploadFile = File(...)) -
 @app.post("/api/device/capture", dependencies=[Depends(verify_dashboard_pin)])
 async def request_device_capture(payload: CaptureRequest) -> dict:
     global _capture_request, _last_frame
+    if not _dashboard_camera_enabled:
+        raise HTTPException(status_code=403, detail="Enable camera control in the dashboard first.")
     if not _last_device_status.get("connected") or time.time() - _last_device_status.get("updated_at", 0) >= 8:
         raise HTTPException(status_code=503, detail="Glasses device is not connected.")
     if not _last_device_status.get("privacy_switch_enabled"):
@@ -477,17 +494,18 @@ button{font:inherit;background:#153c51;color:var(--text);cursor:pointer;border:1
 <section class="card"><h2>Visual question</h2><div class="note">Camera use must be requested. For a live glasses capture, the paired device must report its physical privacy switch and indicator as active. You can also upload a chosen image for testing.</div><label for="visionQuestion">What do you want to know?</label><textarea id="visionQuestion" placeholder="Read the sign and explain what it says."></textarea><label for="imageFile">Choose image for a local test</label><input class="file" id="imageFile" type="file" accept="image/jpeg,image/png,image/webp,image/bmp"><button onclick="askUploadedImage()">Analyze chosen image</button><button class="secondary" onclick="askGlasses()">Capture from paired glasses</button><div id="visionAnswer" class="out" role="status"></div></section>
 <section class="card"><h2>Wake phrase and speech</h2><p class="sub">The device mic sends short audio chunks over your private LAN. Audio is transcribed locally and temporary files are deleted after processing.</p><label for="wakePhrase">Your custom wake phrase</label><input id="wakePhrase" maxlength="80" placeholder="Choose your own phrase later"><button onclick="saveWakePhrase()">Save wake phrase</button><p id="wakeStatus" class="sub">Default placeholder: hey glasses</p><label for="audioFile">Audio file test</label><input class="file" id="audioFile" type="file" accept="audio/*"><button onclick="transcribe()">Transcribe locally</button><button class="secondary" onclick="speakText()">Speak text offline</button><label for="speakText">Text to speak</label><textarea id="speakText" placeholder="Short answer in English or Telugu..."></textarea><div id="speechAnswer" class="out" role="status"></div></section>
 <section class="card"><h2>Local memory</h2><p class="sub">Useful facts and optional conversation summaries. Stored in SQLite on this laptop.</p><label for="memory">Memory</label><textarea id="memory" placeholder="A useful fact to remember..."></textarea><button onclick="saveMemory()">Save</button><button class="secondary" onclick="loadMemories()">Refresh</button><button class="danger" onclick="clearMemory()">Clear all memory and summaries</button><div id="memories" aria-live="polite"></div></section>
-<section class="card"><h2>Privacy and device</h2><div class="kv"><span>Physical camera switch</span><span>Device-reported only</span></div><div class="kv"><span>Camera indicator</span><span id="indicatorState">Unverified</span></div><div class="kv"><span>Capture behavior</span><span>Only after visual request</span></div><div class="kv"><span>LAN dashboard</span><span>PIN protected when enabled</span></div><p class="sub">A software flag cannot replace a physical switch. Firmware must refuse capture when the switch is off and illuminate its indicator during capture.</p></section>
+<section class="card"><h2>Privacy and device</h2><div class="kv"><span>Physical camera switch</span><span>Device-reported only</span></div><div class="kv"><span>Dashboard camera control</span><span id="cameraControlState">Disabled</span></div><button id="cameraControlButton" onclick="toggleCameraControl()">Enable dashboard camera control</button><div class="kv"><span>Camera indicator</span><span id="indicatorState">Unverified</span></div><div class="kv"><span>Capture behavior</span><span>Only after visual request</span></div><div class="kv"><span>LAN dashboard</span><span>PIN protected when enabled</span></div><p class="sub">Both the dashboard control and physical switch must allow capture. Firmware refuses captures when the switch is off and lights the indicator during capture.</p></section>
 </div>
 <p class="footer">Local-first privacy: no cloud AI calls. Do not expose the dashboard to a shared or public network. Device pairing and camera controls require a selected, programmed board.</p>
 </main>
 <script>
 let dashboardPin=sessionStorage.getItem('glasses-pin')||'';
 let latestAnswer='';
+let cameraEnabled=false;
 async function api(url,options){options=options||{};let headers=Object.assign({'X-Dashboard-Pin':dashboardPin},options.headers||{});if(!(options.body instanceof FormData)&&!headers['Content-Type'])headers['Content-Type']='application/json';options.headers=headers;let r=await fetch(url,options);let d;try{d=await r.json()}catch{d={detail:'Unexpected server response'}}if(r.status===401){document.getElementById('pinPanel').style.display='block';throw new Error('Enter the dashboard PIN.')}if(!r.ok)throw new Error(d.detail||'Request failed');return d}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function savePin(){dashboardPin=document.getElementById('pin').value;sessionStorage.setItem('glasses-pin',dashboardPin);loadStatus().then(()=>{document.getElementById('pinPanel').style.display='none';loadMemories()}).catch(e=>document.getElementById('pinMessage').textContent=e.message)}
-async function loadStatus(){try{let s=await api('/api/status');document.getElementById('status').innerHTML=Object.entries(s).map(([k,v])=>'<div class="kv"><span>'+esc(k.replace(/_/g,' '))+'</span><span>'+esc(v)+'</span></div>').join('');let good=String(s.camera).includes('capture allowed')&&s.privacy_indicator==='on';document.getElementById('privacyBadge').textContent=good?'● CAMERA HARDWARE REPORTS ACTIVE':'● CAMERA STATE: OFF / UNVERIFIED';document.getElementById('privacyBadge').className='privacy'+(good?' on':'');document.getElementById('indicatorState').textContent=s.privacy_indicator}catch(e){document.getElementById('status').textContent=e.message;if(e.message.includes('PIN'))document.getElementById('pinPanel').style.display='block'}}
+async function loadStatus(){try{let s=await api('/api/status');document.getElementById('status').innerHTML=Object.entries(s).map(([k,v])=>'<div class="kv"><span>'+esc(k.replace(/_/g,' '))+'</span><span>'+esc(v)+'</span></div>').join('');cameraEnabled=Boolean(s.dashboard_camera_enabled);document.getElementById('cameraControlState').textContent=cameraEnabled?'Enabled':'Disabled';document.getElementById('cameraControlButton').textContent=cameraEnabled?'Disable dashboard camera control':'Enable dashboard camera control';let good=String(s.camera).includes('capture allowed')&&s.privacy_indicator==='on';document.getElementById('privacyBadge').textContent=good?'● CAMERA CAPTURE ACTIVE':'● CAMERA STATE: OFF / UNVERIFIED';document.getElementById('privacyBadge').className='privacy'+(good?' on':'');document.getElementById('indicatorState').textContent=s.privacy_indicator}catch(e){document.getElementById('status').textContent=e.message;if(e.message.includes('PIN'))document.getElementById('pinPanel').style.display='block'}}
 async function loadMemories(){try{let d=await api('/api/memory');document.getElementById('memories').innerHTML=d.items.length?d.items.map(m=>'<div class="item">'+esc(m.content)+'<br><small>'+esc(new Date(m.created_at).toLocaleString())+'</small> <button class="secondary" onclick="deleteMemory('+m.id+')">Delete</button></div>').join(''):'<p class="sub">No saved memories.</p>'}catch(e){document.getElementById('memories').textContent=e.message}}
 async function saveMemory(){let content=document.getElementById('memory').value.trim();if(!content)return;try{await api('/api/memory',{method:'POST',body:JSON.stringify({content})});document.getElementById('memory').value='';await loadMemories()}catch(e){alert(e.message)}}
 async function deleteMemory(id){try{await api('/api/memory/'+id,{method:'DELETE'});await loadMemories()}catch(e){alert(e.message)}}
@@ -499,6 +517,7 @@ async function loadWakePhrase(){try{let d=await api('/api/wake-phrase');document
 async function saveWakePhrase(){let phrase=document.getElementById('wakePhrase').value.trim();if(!phrase)return;try{let d=await api('/api/wake-phrase',{method:'POST',body:JSON.stringify({phrase})});document.getElementById('wakeStatus').textContent='Saved locally: '+d.phrase}catch(e){document.getElementById('wakeStatus').textContent=e.message}}
 async function transcribe(){let file=document.getElementById('audioFile').files[0];if(!file){alert('Choose an audio file first.');return}let form=new FormData();form.append('file',file);let out=document.getElementById('speechAnswer');out.textContent='Transcribing with the cached local model...';try{let d=await api('/api/speech/transcribe',{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin},body:form});out.textContent=d.text+'\nLanguage: '+d.language+' · model: '+d.model;document.getElementById('question').value=d.text}catch(e){out.textContent=e.message}}
 async function askUploadedImage(){let file=document.getElementById('imageFile').files[0];if(!file){alert('Choose an image first.');return}let form=new FormData();form.append('file',file);let q=document.getElementById('visionQuestion').value.trim()||'Describe the main objects and read visible text if possible.';let out=document.getElementById('visionAnswer');out.textContent='Analyzing with local vision model...';try{let d=await api('/api/vision?question='+encodeURIComponent(q),{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin},body:form});out.textContent=d.answer+'\nModel: '+d.model+' · offline'}catch(e){out.textContent=e.message}}
+async function toggleCameraControl(){try{let d=await api('/api/camera/control',{method:'POST',body:JSON.stringify({enabled:!cameraEnabled})});cameraEnabled=d.dashboard_camera_enabled;await loadStatus()}catch(e){alert(e.message)}}
 async function askGlasses(){let question=document.getElementById('visionQuestion').value.trim();if(!question){alert('Enter a visual question first.');return}let out=document.getElementById('visionAnswer');out.textContent='Waiting for the paired glasses. The physical privacy switch must be on...';try{let d=await api('/api/device/capture',{method:'POST',body:JSON.stringify({question})});out.textContent=d.answer+'\nModel: '+d.model+' · offline'}catch(e){out.textContent=e.message}}
 loadStatus();loadMemories();loadWakePhrase();setInterval(loadStatus,5000);
 </script></body></html>
