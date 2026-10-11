@@ -34,6 +34,7 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
     payload = {
         "model": model,
         "stream": False,
+        "keep_alive": "0",
         "messages": [{
             "role": "user",
             "content": question + " Answer in the language used by the user. If text is unclear, say so.",
