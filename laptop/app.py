@@ -117,6 +117,11 @@ class CaptureRequest(BaseModel):
     question: Annotated[str, Field(min_length=1, max_length=500)]
 
 
+class PhoneCameraInput(BaseModel):
+    snapshot_url: Annotated[str, Field(min_length=8, max_length=300)]
+    question: Annotated[str, Field(min_length=1, max_length=500)] = "Describe the main objects and read visible text if possible."
+
+
 class WakePhraseInput(BaseModel):
     phrase: Annotated[str, Field(min_length=3, max_length=80)]
 
@@ -388,6 +393,45 @@ async def vision(question: str = "Describe the main objects and read visible tex
         await file.close()
 
 
+@app.post("/api/phone-camera/analyze", dependencies=[Depends(verify_dashboard_pin)])
+async def analyze_phone_camera(payload: PhoneCameraInput) -> dict:
+    """Fetch one still frame from an Android IP Webcam snapshot URL and analyze it locally."""
+    from ipaddress import ip_address
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import urlparse
+    from urllib.request import Request, urlopen
+
+    parsed = urlparse(payload.snapshot_url.strip())
+    if parsed.scheme != "http" or not parsed.hostname or parsed.username or parsed.password:
+        raise HTTPException(status_code=422, detail="Use the Android IP Webcam snapshot URL, e.g. http://192.168.1.50:8080/shot.jpg.")
+    try:
+        address = ip_address(parsed.hostname)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="For safety, use the phone's private LAN IP address, not a hostname.") from exc
+    if not address.is_private or address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified:
+        raise HTTPException(status_code=422, detail="The camera URL must use a private Wi-Fi/LAN IP address.")
+    if parsed.port is None or parsed.port < 1 or parsed.port > 65535:
+        raise HTTPException(status_code=422, detail="Include the IP Webcam port in the URL.")
+    if not parsed.path.lower().endswith((".jpg", ".jpeg", ".png")):
+        raise HTTPException(status_code=422, detail="Use the IP Webcam still-image URL ending in /shot.jpg.")
+    request = Request(payload.snapshot_url.strip(), headers={"User-Agent": "Ai-Glasses-Local/1.0", "Accept": "image/jpeg,image/png"})
+    try:
+        with urlopen(request, timeout=4) as response:
+            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            raw = response.read(8 * 1024 * 1024 + 1)
+    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(status_code=502, detail="Could not reach the phone camera. Check the phone app, URL, and same-Wi-Fi connection.") from exc
+    if not raw or len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Phone camera frame is empty or exceeds the 8 MB limit.")
+    if content_type not in {"image/jpeg", "image/png"} or not (raw.startswith(b"\\xff\\xd8\\xff") or raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n")):
+        raise HTTPException(status_code=415, detail="The phone URL did not return a JPEG or PNG still image.")
+    try:
+        result = await run_in_threadpool(ask_image_local, raw, payload.question.strip())
+    except VisionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"source": "android-ip-webcam", **result}
+
+
 @app.post("/api/device/audio", dependencies=[Depends(verify_device_token)])
 async def device_audio(request: Request) -> dict:
     global _voice_armed, _voice_last_event, _voice_question_parts
@@ -653,6 +697,7 @@ button,input,textarea{font:inherit;letter-spacing:inherit}button{cursor:pointer;
 <section class="panel transcript"><h2>Transcript</h2><div id="transcriptText" class="transcriptText">» Ready when you are. Type a question below.</div><div id="answerMeta" class="tiny" style="margin-top:12px"></div></section>
 <section class="panel terminal"><div class="termbar"><span class="dots">● ● ●</span> &nbsp; jarvis://activity <span class="gold" style="float:right">● LIVE</span></div><div id="activity" class="termbody"><p class="logline"><span class="gold">$</span> JARVIS core initializing...</p></div></section>
 </aside></div>
+<section class="panel" id="phoneCameraPanel" style="margin-top:14px"><h2>Android phone camera</h2><p class="tiny">Use your OnePlus 9 Pro as a temporary camera over trusted Wi-Fi. Install the IP Webcam Android app, start its server, then paste its snapshot URL (usually http://PHONE-IP:8080/shot.jpg). Each click sends one still image to this laptop for local AI/OCR analysis. No continuous recording.</p><label for="phoneCameraUrl">Phone snapshot URL</label><input id="phoneCameraUrl" type="url" placeholder="http://192.168.1.50:8080/shot.jpg" autocomplete="off"><div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="testPhoneCamera()">Test connection</button><button onclick="analyzePhoneCamera()">Capture &amp; analyze</button><button onclick="disconnectPhoneCamera()">Disconnect</button></div><div id="phoneCameraState" class="out" role="status">Disconnected. Phone camera access starts only when you press a button.</div><div id="phoneCameraAnswer" class="out" aria-live="polite"></div></section>
 <section class="panel" id="connectionsPanel" style="margin-top:14px"><h2>Connections hub</h2><p class="tiny">Connect or disable each available path from one place. Device link status is detected from its recent Wi-Fi heartbeat; camera and device microphone permissions are controlled separately.</p>
 <div class="connection-row"><b>Glasses ↔ laptop (Wi-Fi)</b><span id="glassesLinkState" class="tiny">Checking…</span><button onclick="refreshConnections()">Refresh link</button></div>
 <div class="connection-row"><b>Glasses camera</b><span id="glassesCameraLinkState" class="tiny">Disabled</span><button id="connectionCameraButton" onclick="toggleCameraControl()">Enable camera</button></div>
@@ -688,6 +733,11 @@ async function startMicTest(){try{if(!navigator.mediaDevices||!navigator.mediaDe
 function stopMicTest(){if(micRecorder&&micRecorder.state!=='inactive')micRecorder.stop();document.getElementById('stopRecordButton').disabled=true}
 async function transcribe(){let file=document.getElementById('audioFile').files[0];if(!file){alert('Choose an audio file first.');return}let form=new FormData();form.append('file',file);let out=document.getElementById('speechAnswer');out.textContent='Transcribing locally...';try{let d=await api('/api/speech/transcribe',{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin},body:form});out.textContent=d.text+'\nLanguage: '+d.language+' · '+d.model;document.getElementById('command').value=d.text;logActivity('Audio transcription completed.')}catch(e){out.textContent=e.message}}
 async function askUploadedImage(){let file=document.getElementById('imageFile').files[0];if(!file){alert('Choose an image first.');return}let form=new FormData();form.append('file',file);let q=document.getElementById('visionQuestion').value.trim()||'Describe the main objects and read visible text if possible.';let out=document.getElementById('visionAnswer');out.textContent='Analyzing locally...';try{let d=await api('/api/vision?question='+encodeURIComponent(q),{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin},body:form});out.textContent=d.answer+'\nOCR: '+(d.ocr_text||'(no text detected)')+'\nModel: '+d.model;setTranscript(q,d.answer,'VISION · OFFLINE');logActivity('Chosen image analyzed locally.')}catch(e){out.textContent=e.message}}
+let phoneCameraConnected=false;
+function phoneCameraPayload(){const snapshot_url=document.getElementById('phoneCameraUrl').value.trim();const question=document.getElementById('visionQuestion').value.trim()||'Describe the main objects and read visible text if possible.';if(!snapshot_url)throw new Error('Enter the phone IP Webcam snapshot URL first.');return {snapshot_url,question}}
+async function testPhoneCamera(){const state=document.getElementById('phoneCameraState');state.textContent='Checking phone camera connection…';try{const p=phoneCameraPayload();const d=await api('/api/phone-camera/analyze',{method:'POST',body:JSON.stringify({...p,question:'Briefly describe this test image.'})});phoneCameraConnected=true;state.textContent='Connected. One still frame reached the laptop and was analyzed locally.';document.getElementById('phoneCameraAnswer').textContent=d.answer+'\\nOCR: '+(d.ocr_text||'(no text detected)')+'\\nModel: '+d.model;logActivity('Android phone camera connection tested.')}catch(e){phoneCameraConnected=false;state.textContent=e.message}}
+async function analyzePhoneCamera(){const state=document.getElementById('phoneCameraState'),out=document.getElementById('phoneCameraAnswer');state.textContent='Capturing one still frame and analyzing locally…';out.textContent='';try{const p=phoneCameraPayload();const d=await api('/api/phone-camera/analyze',{method:'POST',body:JSON.stringify(p)});phoneCameraConnected=true;state.textContent='Frame captured. No continuous stream is running.';out.textContent=d.answer+'\\nOCR: '+(d.ocr_text||'(no text detected)')+'\\nModel: '+d.model;setTranscript(p.question,d.answer,'PHONE CAMERA · LOCAL ANALYSIS');logActivity('One phone-camera frame analyzed locally.')}catch(e){phoneCameraConnected=false;state.textContent=e.message}}
+function disconnectPhoneCamera(){phoneCameraConnected=false;document.getElementById('phoneCameraState').textContent='Disconnected. The laptop will not request another frame until you press a button.';document.getElementById('phoneCameraAnswer').textContent='';logActivity('Android phone camera disconnected.')}
 async function askGlasses(){let question=document.getElementById('visionQuestion').value.trim();if(!question){alert('Enter a visual question first.');return}let out=document.getElementById('visionAnswer');out.textContent='Waiting for paired glasses and physical privacy switch...';try{let d=await api('/api/device/capture',{method:'POST',body:JSON.stringify({question})});out.textContent=d.answer+'\nOCR: '+(d.ocr_text||'(no text detected)')+'\nModel: '+d.model;setTranscript(question,d.answer,'GLASSES VISION · OFFLINE');logActivity('Requested one privacy-gated frame.')}catch(e){out.textContent=e.message;logActivity('Capture blocked: '+e.message)}}
 async function refreshConnections(){try{const s=await api('/api/status');const connected=s.glasses_device==='connected';document.getElementById('glassesLinkState').textContent=connected?'Connected over Wi-Fi':'Disconnected / heartbeat stale';document.getElementById('glassesLinkState').style.color=connected?'var(--green)':'var(--gold)';document.getElementById('glassesCameraLinkState').textContent=s.dashboard_camera_enabled?'Permission enabled':'Permission disabled';document.getElementById('glassesMicrophoneLinkState').textContent=s.dashboard_microphone_enabled?'Permission enabled':'Permission disabled';document.getElementById('connectionCameraButton').textContent=s.dashboard_camera_enabled?'Disconnect camera permission':'Connect camera permission';document.getElementById('connectionMicrophoneButton').textContent=s.dashboard_microphone_enabled?'Disconnect microphone permission':'Connect microphone permission';document.getElementById('connectionHelp').textContent=connected?'Glasses link is active. Disable camera/microphone permissions separately when you want those parts disconnected.':'Check that the board is powered, on the same Wi-Fi, and configured with this laptop’s LAN IP.';}catch(e){document.getElementById('glassesLinkState').textContent='Unavailable: '+e.message}}
 function disconnectLaptopMic(){if(micRecorder&&micRecorder.state!=='inactive'){micRecorder.onstop=null;micRecorder.stop()}if(micStream)micStream.getTracks().forEach(t=>t.stop());micStream=null;micRecorder=null;micChunks=[];document.getElementById('recordButton').disabled=false;document.getElementById('stopRecordButton').disabled=true;document.getElementById('laptopMicConnectButton').disabled=false;document.getElementById('laptopMicDisconnectButton').disabled=true;document.getElementById('laptopMicrophoneLinkState').textContent='Disconnected';document.getElementById('micTestState').textContent='Laptop microphone disconnected';logActivity('Laptop microphone disconnected; browser audio tracks stopped.')}
