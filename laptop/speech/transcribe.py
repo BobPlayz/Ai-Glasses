@@ -11,6 +11,7 @@ class SpeechError(RuntimeError):
 
 _model_cache: dict[str, object] = {}
 _model_lock = threading.Lock()
+_inference_lock = threading.Lock()
 
 
 def transcribe_audio_file(audio_path: str | Path, model_size: str | None = None) -> dict:
@@ -41,8 +42,9 @@ def transcribe_audio_file(audio_path: str | Path, model_size: str | None = None)
                     local_files_only=True,
                 )
                 _model_cache[size] = model
-        segments, info = model.transcribe(str(path), beam_size=3, vad_filter=True)
-        text = " ".join(segment.text.strip() for segment in segments).strip()
+        with _inference_lock:
+            segments, info = model.transcribe(str(path), beam_size=3, vad_filter=True)
+            text = " ".join(segment.text.strip() for segment in segments).strip()
     except Exception as exc:
         raise SpeechError(
             "Offline speech model is not cached or audio could not be processed. "
