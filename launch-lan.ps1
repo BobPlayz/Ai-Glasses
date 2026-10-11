@@ -4,6 +4,13 @@ $venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) { throw "Environment not found. Run .\setup.ps1 first." }
 if (-not (Test-Path (Join-Path $PSScriptRoot ".dashboard-pin"))) { throw "Dashboard PIN missing. Run .\setup.ps1 first." }
 if (-not (Test-Path (Join-Path $PSScriptRoot ".device-token"))) { throw "Device pairing token missing. Run .\setup.ps1 first." }
+if (-not (Test-Path (Join-Path $PSScriptRoot "data\.setup-complete"))) { throw "Full setup is incomplete. Run .\setup.ps1 and let all models and firmware compile finish." }
+$ollama = Get-Command ollama -ErrorAction SilentlyContinue
+if (-not $ollama) { throw "Ollama is unavailable. Reopen PowerShell and rerun .\setup.ps1." }
+$models = (& ollama list | Out-String)
+foreach ($required in @("qwen2.5:1.5b", "qwen2.5:0.5b", "moondream:1.8b")) {
+    if ($models -notmatch [regex]::Escape($required)) { throw "Required local model $required is missing. Run .\setup.ps1." }
+}
 
 Write-Host "LAN mode exposes the dashboard to devices on your current network." -ForegroundColor Yellow
 Write-Host "Use only a trusted private Wi-Fi/hotspot. Do not use public Wi-Fi." -ForegroundColor Yellow
