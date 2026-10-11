@@ -87,6 +87,10 @@ Write-Host "Caching local vision model..." -ForegroundColor Cyan
 & ollama pull moondream:1.8b
 if ($LASTEXITCODE -ne 0) { throw "Vision model download failed." }
 
+Write-Host "Verifying both offline neural voices can synthesize audio..." -ForegroundColor Cyan
+& $venvPython (Join-Path $PSScriptRoot "scripts\verify_voice_assets.py")
+if ($LASTEXITCODE -ne 0) { throw "Offline neural voice verification failed." }
+
 Write-Host "Compiling candidate ESP32-S3 firmware..." -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot ".venv\Scripts\pio.exe") run -d (Join-Path $PSScriptRoot "firmware\xiao-esp32s3-sense")
 if ($LASTEXITCODE -ne 0) { throw "Candidate firmware compile failed. Do not launch the full project until the compile error is fixed." }
