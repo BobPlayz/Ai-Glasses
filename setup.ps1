@@ -117,6 +117,12 @@ Write-Host "Compiling candidate ESP32-S3 firmware..." -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot ".venv\Scripts\pio.exe") run -d (Join-Path $PSScriptRoot "firmware\xiao-esp32s3-sense")
 if ($LASTEXITCODE -ne 0) { throw "Candidate firmware compile failed. Do not launch the full project until the compile error is fixed." }
 
+Write-Host "Compiling all Python source and running unit tests..." -ForegroundColor Cyan
+& $venvPython -m compileall -q laptop tests scripts
+if ($LASTEXITCODE -ne 0) { throw "Python source compilation failed." }
+& $venvPython -m unittest discover -s tests -v
+if ($LASTEXITCODE -ne 0) { throw "Unit tests failed. Do not launch until failures are fixed." }
+
 Write-Host "Testing local text models, vision, and OCR end to end..." -ForegroundColor Cyan
 & $venvPython (Join-Path $PSScriptRoot "scripts\verify_local_models.py")
 if ($LASTEXITCODE -ne 0) { throw "Local AI integration preflight failed. Fix the reported component and rerun setup." }
