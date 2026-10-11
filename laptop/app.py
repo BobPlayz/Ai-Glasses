@@ -137,6 +137,18 @@ def normalize_speech(text: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", text.casefold(), flags=re.UNICODE).split())
 
 
+def is_visual_question(text: str) -> bool:
+    normalized = normalize_speech(text)
+    phrases = (
+        "what am i looking at", "what am i seeing", "what is this", "what is in front of me",
+        "describe what you see", "describe this", "read this", "read the text", "read this sign",
+        "what does this say", "what is written here", "identify this", "look at this",
+        "నేను ఏమి చూస్తున్నాను", "నేను ఏం చూస్తున్నాను", "ఇది ఏమిటి", "ఇది ఏంటి",
+        "ఇది చదువు", "చదివి చెప్పు", "నా ముందు ఏముంది", "ఇక్కడ ఏముంది", "ఇందులో ఏముంది",
+    )
+    return any(phrase in normalized for phrase in phrases)
+
+
 def short_speech_text(text: str, limit: int = 220) -> str:
     clean = " ".join(text.strip().split())
     if len(clean) <= limit:
@@ -394,6 +406,32 @@ async def device_audio(request: Request) -> dict:
     if not question:
         _voice_last_event = {"state": "listening", "detail": "No question text was recognized."}
         return {"state": "listening", "transcript": "", "wake_detected": False}
+    if is_visual_question(question):
+        try:
+            visual = await capture_frame_for_question(question)
+            spoken_text = short_speech_text(visual["answer"])
+            speech = await run_in_threadpool(speak_local, spoken_text)
+            _voice_last_event = {
+                "state": "answered_visual",
+                "detail": f"Visual question answered using {visual['model']}.",
+                "question": question,
+                "answer": visual["answer"],
+            }
+            return {
+                "state": "answered_visual",
+                "transcript": question,
+                "answer": visual["answer"],
+                "ocr_text": visual.get("ocr_text", ""),
+                "model": visual["model"],
+                "speech": speech,
+                "offline": True,
+            }
+        except HTTPException as exc:
+            spoken_text = short_speech_text(exc.detail)
+            await run_in_threadpool(speak_local, spoken_text)
+            _voice_last_event = {"state": "visual_unavailable", "detail": exc.detail, "question": question, "answer": exc.detail}
+            return {"state": "visual_unavailable", "transcript": question, "answer": exc.detail, "offline": True}
+
     memories = search_memories(DB_PATH, question)
     try:
         reply = await run_in_threadpool(ask_local, question, memories)
@@ -462,22 +500,19 @@ async def device_capture_result(request_id: str, file: UploadFile = File(...)) -
     return {"accepted": True, "request_id": request_id}
 
 
-@app.post("/api/device/capture", dependencies=[Depends(verify_dashboard_pin)])
-async def request_device_capture(payload: CaptureRequest) -> dict:
+async def capture_frame_for_question(question: str) -> dict:
     global _capture_request, _last_frame
     if not _dashboard_camera_enabled:
-        raise HTTPException(status_code=403, detail="Enable camera control in the dashboard first.")
+        raise HTTPException(status_code=403, detail="Enable dashboard camera control first.")
     if not _last_device_status.get("connected") or time.time() - _last_device_status.get("updated_at", 0) >= 8:
         raise HTTPException(status_code=503, detail="Glasses device is not connected.")
     if not _last_device_status.get("privacy_switch_enabled"):
         raise HTTPException(status_code=403, detail="Turn on the physical camera privacy switch first.")
-    if not _last_device_status.get("camera_enabled"):
-        raise HTTPException(status_code=403, detail="The device does not report camera capture as enabled.")
     if _capture_request:
         raise HTTPException(status_code=409, detail="A capture request is already active.")
     request_id = uuid4().hex
     _last_frame = None
-    _capture_request = {"id": request_id, "question": payload.question, "expires_at": time.time() + 12}
+    _capture_request = {"id": request_id, "question": question, "expires_at": time.time() + 12}
     deadline = time.time() + 12
     while time.time() < deadline:
         if _last_frame and _last_frame["request_id"] == request_id:
@@ -485,13 +520,18 @@ async def request_device_capture(payload: CaptureRequest) -> dict:
             _last_frame = None
             _capture_request = None
             try:
-                result = await run_in_threadpool(ask_image_local, frame, payload.question)
+                result = await run_in_threadpool(ask_image_local, frame, question)
                 return {"request_id": request_id, **result}
             except VisionError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
         await asyncio.sleep(0.2)
     _capture_request = None
     raise HTTPException(status_code=504, detail="No frame arrived from the glasses within 12 seconds.")
+
+
+@app.post("/api/device/capture", dependencies=[Depends(verify_dashboard_pin)])
+async def request_device_capture(payload: CaptureRequest) -> dict:
+    return await capture_frame_for_question(payload.question)
 
 
 @app.get("/api/device/config", dependencies=[Depends(verify_device_token)])
