@@ -19,3 +19,7 @@ Thumbs.db
 .dashboard-pin
 .device-token
 firmware/**/secrets.h
+
+models/tesseract/
+models/tts/
+models/whisper/
