@@ -6,8 +6,9 @@ This is candidate firmware, not verified firmware. Do not flash until the exact 
 - Joins a private local Wi-Fi network.
 - Authenticates to the laptop using the shared .device-token.
 - Posts camera/privacy/microphone state to /api/device/status.
-- Polls /api/device/command for an explicit visual-question capture request.
-- Checks the physical privacy switch before camera capture and illuminates the external indicator during capture.
+- Polls /api/device/command for dashboard camera permission and an explicit visual-question capture request.
+- Camera driver remains stopped until both dashboard permission and the physical switch allow it.
+- Checks the physical privacy switch before capture and illuminates the external indicator during capture.
 - Uploads one JPEG frame to /api/device/capture-result.
 - Captures short mono 16 kHz audio chunks from the candidate onboard PDM microphone and sends WAV data to /api/device/audio.
 - The laptop performs wake-phrase detection, speech recognition, local model inference, and best-effort offline speech output.
