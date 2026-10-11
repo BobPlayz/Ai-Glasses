@@ -76,7 +76,7 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
     payload = {
         "model": model,
         "stream": False,
-        "keep_alive": "0",
+        "keep_alive": "5m",
         "messages": [{
             "role": "user",
             "content": prompt,
@@ -91,7 +91,7 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=180) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:400]
@@ -107,7 +107,7 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
         retry_payload = {
             "model": model,
             "stream": False,
-            "keep_alive": "0",
+            "keep_alive": "5m",
             "messages": [{
                 "role": "user",
                 "content": "Describe this image briefly. Read visible text if possible.",
@@ -122,7 +122,7 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(retry_request, timeout=60) as response:
+            with urllib.request.urlopen(retry_request, timeout=180) as response:
                 retry_result = json.loads(response.read().decode("utf-8"))
             answer = retry_result.get("message", {}).get("content", "").strip()
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
