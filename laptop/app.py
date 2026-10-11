@@ -163,7 +163,7 @@ def status() -> dict:
         "mode": "local-only",
         "language_model": ", ".join(models) if model_status["available"] and models else "Ollama unavailable or models not downloaded",
         "speech_recognition": "adapter available; requires cached Whisper model",
-        "text_to_speech": "offline Windows voices with eSpeak NG fallback; verify Telugu voice",
+        "text_to_speech": "cached Piper neural English/Telugu voices; Windows SAPI/eSpeak fallback",
         "vision_ocr": "local Ollama vision adapter; model must be cached",
         "glasses_device": "connected" if _last_device_status.get("connected") and time.time() - _last_device_status.get("updated_at", 0) < 8 else "not connected",
         "camera": "capture allowed" if _dashboard_camera_enabled and _last_device_status.get("camera_enabled") and _last_device_status.get("privacy_switch_enabled") else "capture disabled / unverified",
