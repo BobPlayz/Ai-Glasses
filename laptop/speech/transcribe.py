@@ -23,7 +23,7 @@ def transcribe_audio_file(audio_path: str | Path, model_size: str | None = None)
         raise SpeechError("Speech support is not installed. Run project setup first.") from exc
 
     size = model_size or os.environ.get("GLASSES_WHISPER_MODEL", "base")
-    cache_dir = Path(os.environ.get("GLASSES_MODEL_CACHE", Path.home() / ".cache" / "huggingface"))
+    cache_dir = Path(os.environ.get("GLASSES_MODEL_CACHE", Path(__file__).resolve().parents[2] / "models" / "whisper"))
     try:
         model = WhisperModel(
             size,
