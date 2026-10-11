@@ -1,6 +1,9 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
-Write-Host "AI Glasses setup" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " AI Glasses full setup" -ForegroundColor Cyan
+Write-Host " This prepares software, local models, and candidate firmware."
+Write-Host "========================================" -ForegroundColor Cyan
 
 $py = Get-Command py -ErrorAction SilentlyContinue
 if (-not $py) { throw "Python launcher 'py' not found. Install Python 3.11 and enable the launcher." }
@@ -16,9 +19,12 @@ $venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed." }
 & $venvPython -m pip install -r requirements.txt
 if ($LASTEXITCODE -ne 0) { throw "Python dependency installation failed." }
+& $venvPython -m pip install -r requirements-firmware.txt
+if ($LASTEXITCODE -ne 0) { throw "PlatformIO installation failed." }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot "data") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot "models") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot "data\temp") | Out-Null
 
 # Generate local secrets once. These files are excluded from Git.
 $pinPath = Join-Path $PSScriptRoot ".dashboard-pin"
@@ -36,52 +42,44 @@ if (-not (Test-Path $deviceTokenPath)) {
     $rng.Dispose()
     $token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
     Set-Content -Path $deviceTokenPath -Value $token -NoNewline
-    Write-Host "Created local device pairing token in .device-token. Copy it only into your private firmware secrets file." -ForegroundColor Yellow
+    Write-Host "Created local device pairing token in .device-token." -ForegroundColor Yellow
 }
 
 $ollama = Get-Command ollama -ErrorAction SilentlyContinue
 if (-not $ollama) {
-    Write-Host "Ollama is required for local language-model answers." -ForegroundColor Yellow
     $winget = Get-Command winget -ErrorAction SilentlyContinue
-    if ($winget) {
-        $install = Read-Host "Install Ollama using Windows Package Manager now? Internet required (Y/N)"
-        if ($install -match "^[Yy]$") {
-            & winget install --id Ollama.Ollama -e --accept-package-agreements --accept-source-agreements
-            if ($LASTEXITCODE -ne 0) { throw "Ollama installation failed. Install from ollama.com/download/windows and rerun setup." }
-            $ollama = Get-Command ollama -ErrorAction SilentlyContinue
-        }
-    }
+    if (-not $winget) { throw "Ollama is missing and winget is unavailable. Install Ollama from https://ollama.com/download/windows, reopen PowerShell, and rerun setup." }
+    & winget install --id Ollama.Ollama -e --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) { throw "Ollama installation failed." }
+    $ollama = Get-Command ollama -ErrorAction SilentlyContinue
+    if (-not $ollama) { throw "Ollama was installed. Close and reopen PowerShell, then rerun .\setup.ps1 to continue model setup." }
 }
 
+Write-Host "Caching multilingual Whisper speech model..." -ForegroundColor Cyan
+$env:GLASSES_MODEL_CACHE = Join-Path $PSScriptRoot "models\whisper"
+& $venvPython -c "from faster_whisper import WhisperModel; import os; WhisperModel('base', device='cpu', compute_type='int8', download_root=os.environ['GLASSES_MODEL_CACHE'])"
+if ($LASTEXITCODE -ne 0) { throw "Whisper model download failed. Fix the connection and rerun setup." }
+
+Write-Host "Caching local text models..." -ForegroundColor Cyan
+& ollama pull qwen2.5:1.5b
+if ($LASTEXITCODE -ne 0) { throw "Primary language model download failed." }
+& ollama pull qwen2.5:0.5b
+if ($LASTEXITCODE -ne 0) { throw "Fallback language model download failed." }
+Write-Host "Caching local vision model..." -ForegroundColor Cyan
+& ollama pull moondream:1.8b
+if ($LASTEXITCODE -ne 0) { throw "Vision model download failed." }
+
+Write-Host "Compiling candidate ESP32-S3 firmware..." -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot ".venv\Scripts\pio.exe") run -d (Join-Path $PSScriptRoot "firmware\xiao-esp32s3-sense")
+if ($LASTEXITCODE -ne 0) { throw "Candidate firmware compile failed. Do not launch the full project until the compile error is fixed." }
+
+Write-Host "Verifying cached Whisper model works offline..." -ForegroundColor Cyan
+& $venvPython -c "from faster_whisper import WhisperModel; import os; WhisperModel('base', device='cpu', compute_type='int8', download_root=os.environ['GLASSES_MODEL_CACHE'], local_files_only=True)"
+if ($LASTEXITCODE -ne 0) { throw "Offline Whisper cache verification failed." }
+
+& ollama list
+New-Item -ItemType File -Force -Path (Join-Path $PSScriptRoot "data\.setup-complete") | Out-Null
 Write-Host ""
-$cacheWhisper = Read-Host "Download/cache the multilingual Whisper base speech model now? This requires internet and about 150 MB (Y/N)"
-if ($cacheWhisper -match "^[Yy]$") {
-    $env:GLASSES_MODEL_CACHE = Join-Path $PSScriptRoot "models\whisper"
-    & $venvPython -c "from faster_whisper import WhisperModel; import os; WhisperModel('base', device='cpu', compute_type='int8', download_root=os.environ['GLASSES_MODEL_CACHE'])"
-    if ($LASTEXITCODE -ne 0) { throw "Whisper model cache failed. Check internet access and rerun setup." }
-} else {
-    Write-Host "Whisper model cache skipped. Offline speech recognition will not work until cached." -ForegroundColor Yellow
-}
-
-if ($ollama) {
-    Write-Host "Model downloads happen now, not during questions." -ForegroundColor Cyan
-    $pull = Read-Host "Download qwen2.5:1.5b and qwen2.5:0.5b? Several GB may be downloaded (Y/N)"
-    if ($pull -match "^[Yy]$") {
-        & ollama pull qwen2.5:1.5b
-        if ($LASTEXITCODE -ne 0) { throw "Primary model download failed. Rerun setup after fixing the connection." }
-        & ollama pull qwen2.5:0.5b
-        if ($LASTEXITCODE -ne 0) { throw "Fallback model download failed. Rerun setup after fixing the connection." }
-    } else {
-        Write-Host "Model downloads skipped. Local answers remain unavailable until models are cached." -ForegroundColor Yellow
-    }
-    $pullVision = Read-Host "Also download the candidate vision model moondream:1.8b? It may use substantial RAM during vision tasks (Y/N)"
-    if ($pullVision -match "^[Yy]$") {
-        & ollama pull moondream:1.8b
-        if ($LASTEXITCODE -ne 0) { Write-Host "Vision model download failed; text model setup is still usable." -ForegroundColor Yellow }
-    }
-} else {
-    Write-Host "Ollama not installed. Dashboard can open, but local AI answers will not work yet." -ForegroundColor Yellow
-}
-Write-Host "Python environment and dependencies are ready." -ForegroundColor Green
-Write-Host "Before offline testing, ensure Ollama and both model files are installed." -ForegroundColor Yellow
-Write-Host "Next command: .\launch.ps1" -ForegroundColor Cyan
+Write-Host "Setup finished: Python dependencies, local model assets, secrets, and candidate firmware compile are ready." -ForegroundColor Green
+Write-Host "The first app launch is now gated on these checks." -ForegroundColor Green
+Write-Host "Keep .dashboard-pin and .device-token private." -ForegroundColor Yellow
