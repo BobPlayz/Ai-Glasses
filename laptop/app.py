@@ -52,6 +52,24 @@ def connect_db() -> sqlite3.Connection:
     return connection
 
 
+
+def recent_conversation_context(limit: int = 6) -> list[dict[str, str]]:
+    """Return a small recent dialogue window for natural follow-up questions."""
+    try:
+        with connect_db() as db:
+            rows = db.execute(
+                "SELECT user_text, assistant_text FROM conversations ORDER BY id DESC LIMIT ?",
+                (max(1, min(limit, 8)),),
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    history: list[dict[str, str]] = []
+    for row in reversed(rows):
+        history.append({"role": "user", "content": row["user_text"]})
+        history.append({"role": "assistant", "content": row["assistant_text"]})
+    return history
+
+
 def init_db() -> None:
     with connect_db() as db:
         db.execute(
@@ -202,7 +220,7 @@ def status() -> dict:
         "mode": "local-only",
         "language_model": ", ".join(models) if model_status["available"] and models else "Ollama unavailable or models not downloaded",
         "speech_recognition": "cached local Whisper; live voice requires the paired device microphone",
-        "text_to_speech": "Windows SAPI installed voice (offline; no API key or cloud service)",
+        "text_to_speech": "Offline male Piper neural English and Telugu voices (no API key or cloud service)",
         "vision_ocr": "local Tesseract English/Telugu OCR + Ollama vision model",
         "glasses_device": "connected" if device_fresh else "not connected",
         "camera": "capture allowed" if _dashboard_camera_enabled and device_fresh and _last_device_status.get("camera_enabled") and _last_device_status.get("privacy_switch_enabled") else "capture disabled / unverified",
@@ -283,7 +301,7 @@ def ask(payload: AskInput) -> dict:
     question = payload.content.strip()
     memories = search_memories(DB_PATH, question)
     try:
-        reply = ask_local(question, memories)
+        reply = ask_local(question, memories, recent_conversation_context())
     except OllamaError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     save_conversation(question, reply.text, reply.model, payload.remember_summary)
@@ -452,7 +470,7 @@ async def device_audio(request: Request) -> dict:
 
     memories = search_memories(DB_PATH, question)
     try:
-        reply = await run_in_threadpool(ask_local, question, memories)
+        reply = await run_in_threadpool(ask_local, question, memories, recent_conversation_context())
     except OllamaError as exc:
         _voice_last_event = {"state": "error", "detail": str(exc)}
         raise HTTPException(status_code=503, detail=str(exc)) from exc
