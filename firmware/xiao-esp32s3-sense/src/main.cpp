@@ -28,6 +28,7 @@ static bool cameraReady = false;
 static bool indicatorOn = false;
 static bool microphoneReady = false;
 static bool dashboardCameraAllowed = false;
+static volatile bool dashboardMicrophoneAllowed = false; // Server opt-in defaults to false.
 static int16_t* microphoneSamples = nullptr;
 
 bool privacySwitchEnabled() {
@@ -133,10 +134,12 @@ void writeLe32(uint8_t* out, uint32_t value) {
 }
 
 bool sendMicrophoneChunk() {
-  if (!microphoneReady || WiFi.status() != WL_CONNECTED || !microphoneSamples) return false;
+  if (!microphoneReady || !dashboardMicrophoneAllowed || WiFi.status() != WL_CONNECTED || !microphoneSamples) return false;
   size_t filled = 0;
   const size_t targetBytes = MIC_SAMPLES * sizeof(int16_t);
   while (filled < targetBytes) {
+    // Abort promptly when dashboard permission is revoked, including mid-chunk.
+    if (!dashboardMicrophoneAllowed || WiFi.status() != WL_CONNECTED) return false;
     size_t bytesRead = 0;
     esp_err_t err = i2s_read(I2S_NUM_0,
       reinterpret_cast<uint8_t*>(microphoneSamples) + filled,
@@ -162,6 +165,8 @@ bool sendMicrophoneChunk() {
   writeLe32(wav + 40, static_cast<uint32_t>(targetBytes));
   memcpy(wav + 44, microphoneSamples, targetBytes);
 
+  // Recheck permission immediately before any microphone data leaves the board.
+  if (!dashboardMicrophoneAllowed || WiFi.status() != WL_CONNECTED) { free(wav); return false; }
   HTTPClient http;
   http.begin(apiUrl("/api/device/audio"));
   http.addHeader("X-Device-Token", DEVICE_TOKEN);
@@ -242,6 +247,7 @@ void checkCommand() {
   JsonDocument doc;
   if (deserializeJson(doc, body) != DeserializationError::Ok) return;
   dashboardCameraAllowed = doc["camera_allowed"] | false;
+  dashboardMicrophoneAllowed = doc["microphone_allowed"] | false;
   if (!dashboardCameraAllowed || !privacySwitchEnabled()) {
     if (cameraReady) {
       esp_camera_deinit();
@@ -275,7 +281,7 @@ void checkCommand() {
 
 void microphoneTask(void* parameter) {
   for (;;) {
-    if (microphoneReady && WiFi.status() == WL_CONNECTED) {
+    if (microphoneReady && dashboardMicrophoneAllowed && WiFi.status() == WL_CONNECTED) {
       sendMicrophoneChunk();
     }
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -325,6 +331,9 @@ void setup() {
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     setIndicator(false);
+    dashboardCameraAllowed = false;
+    dashboardMicrophoneAllowed = false;
+    if (cameraReady) { esp_camera_deinit(); cameraReady = false; }
     delay(500);
     return;
   }
