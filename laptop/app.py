@@ -127,7 +127,7 @@ def current_wake_phrase() -> str:
 
 
 def normalize_speech(text: str) -> str:
-    return re.sub(r"[^\\w\\s]", " ", text.casefold(), flags=re.UNICODE).strip()
+    return re.sub(r"[^\w\s]", " ", text.casefold(), flags=re.UNICODE).strip()
 
 
 def verify_device_token(x_device_token: str | None = Header(default=None)) -> None:
