@@ -4,7 +4,11 @@
 #include <ArduinoJson.h>
 #include "esp_camera.h"
 #include "driver/i2s.h"
+#if __has_include("secrets.h")
 #include "secrets.h"
+#else
+#include "secrets.example.h"
+#endif
 
 // Candidate firmware for Seeed XIAO ESP32-S3 Sense.
 // Not verified against a purchased board. Confirm exact revision and pin map.
