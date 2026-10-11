@@ -8,7 +8,7 @@ from piper import PiperVoice
 
 ROOT = Path(__file__).resolve().parents[1]
 VOICE_DIR = ROOT / "models" / "tts"
-VOICES = ("en_US-lessac-medium", "te_IN-maya-medium")
+VOICES = ("en_GB-alan-medium", "te_IN-maya-medium")
 
 
 def main() -> int:
