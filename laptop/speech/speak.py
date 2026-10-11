@@ -94,7 +94,7 @@ def speak_local(text: str) -> dict:
                         break
             if chosen is not None:
                 engine.setProperty("voice", chosen.id)
-            engine.setProperty("rate", 165)
+            engine.setProperty("rate", 185)
             engine.say(text[:1200])
             engine.runAndWait()
             engine.stop()
@@ -111,7 +111,7 @@ def speak_local(text: str) -> dict:
     if executable:
         try:
             subprocess.run(
-                [executable, "-s", "155", text[:1200]],
+                [executable, "-s", "170", text[:1200]],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
