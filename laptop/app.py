@@ -515,6 +515,12 @@ async def capture_frame_for_question(question: str) -> dict:
     _capture_request = {"id": request_id, "question": question, "expires_at": time.time() + 12}
     deadline = time.time() + 12
     while time.time() < deadline:
+        if not _dashboard_camera_enabled:
+            _capture_request = None
+            raise HTTPException(status_code=403, detail="Camera control was disabled before capture completed.")
+        if not _last_device_status.get("privacy_switch_enabled"):
+            _capture_request = None
+            raise HTTPException(status_code=403, detail="Physical camera privacy switch was turned off.")
         if _last_frame and _last_frame["request_id"] == request_id:
             frame = _last_frame["bytes"]
             _last_frame = None
