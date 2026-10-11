@@ -20,7 +20,7 @@ A local-first smart-glasses prototype for a school exhibition. The Windows lapto
 
 ## Requirements
 
-- Windows 11
+- Windows 10 or 11 (64-bit; Python 3.11 is required)
 - Python 3.11
 - Internet for first-time dependencies and model caching
 - Ollama
@@ -65,7 +65,7 @@ Find the laptop IPv4 address using ipconfig, then open http://LAPTOP-IP:8765 on 
 - OCR: local Tesseract with eng+tel data
 - TTS: Piper en_GB-alan-medium British English and te_IN-venkatesh-medium Telugu voices
 
-These are configuration candidates. Actual model latency, memory pressure, Telugu recognition quality, and voice availability must be verified on the target laptop. The app never downloads models while answering a question.
+These are configuration candidates. Actual model latency, memory pressure, Telugu recognition quality, and voice availability must be verified on the target laptop. The app never downloads models while answering a question. On an 8 GB laptop, close memory-heavy apps during first model loads; local vision inference may be slower than text chat.
 
 ## Privacy defaults
 
