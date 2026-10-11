@@ -99,10 +99,10 @@ bool initMicrophone() {
     return false;
   }
   i2s_pin_config_t pins = {};
-  pins.bck_io_num = 41; // candidate onboard PDM microphone clock
-  pins.ws_io_num = -1;
-  pins.data_out_num = -1;
-  pins.data_in_num = 42; // candidate onboard PDM microphone data
+  pins.bck_io_num = I2S_PIN_NO_CHANGE;
+  pins.ws_io_num = 42; // XIAO Sense PDM microphone clock
+  pins.data_out_num = I2S_PIN_NO_CHANGE;
+  pins.data_in_num = 41; // XIAO Sense PDM microphone data
   err = i2s_set_pin(I2S_NUM_0, &pins);
   if (err != ESP_OK) {
     Serial.printf("Microphone pin setup failed: 0x%x\n", err);
