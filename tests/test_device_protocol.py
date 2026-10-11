@@ -1,0 +1,48 @@
+import unittest
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
+from laptop.app import app, DEVICE_TOKEN_PATH, PIN_PATH
+
+
+class DeviceProtocolTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(app)
+        self.old_token = DEVICE_TOKEN_PATH.read_text() if DEVICE_TOKEN_PATH.exists() else None
+        self.old_pin = PIN_PATH.read_text() if PIN_PATH.exists() else None
+        DEVICE_TOKEN_PATH.write_text("test-device-token")
+        PIN_PATH.write_text("test-dashboard-pin")
+
+    def tearDown(self):
+        if self.old_token is None:
+            DEVICE_TOKEN_PATH.unlink(missing_ok=True)
+        else:
+            DEVICE_TOKEN_PATH.write_text(self.old_token)
+        if self.old_pin is None:
+            PIN_PATH.unlink(missing_ok=True)
+        else:
+            PIN_PATH.write_text(self.old_pin)
+
+    def test_device_token_required(self):
+        response = self.client.get("/api/device/command")
+        self.assertEqual(response.status_code, 401)
+
+    def test_device_command_with_token(self):
+        response = self.client.get("/api/device/command", headers={"X-Device-Token":"test-device-token"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("capture", response.json())
+
+    def test_lan_dashboard_pin_required(self):
+        with patch.dict("os.environ", {"GLASSES_LAN_MODE":"1"}):
+            response = self.client.get("/api/status")
+        self.assertEqual(response.status_code, 401)
+
+    def test_localhost_mode_does_not_require_pin(self):
+        with patch.dict("os.environ", {"GLASSES_LAN_MODE":"0"}):
+            response = self.client.get("/api/status")
+        self.assertEqual(response.status_code, 200)
+
+
+if __name__ == "__main__":
+    unittest.main()
