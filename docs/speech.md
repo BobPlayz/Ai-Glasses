@@ -1,9 +1,15 @@
-# Offline speech plan
+# Offline speech
 
-The repository includes an audio-file transcription adapter based on faster-whisper and a best-effort local eSpeak NG output adapter.
+## Input
+The candidate ESP32-S3 firmware samples the onboard PDM microphone at 16 kHz, mono, 16-bit and sends short WAV chunks to the laptop over the private LAN. The laptop uses a cached multilingual faster-whisper base model with CPU int8 inference. Temporary WAV files are deleted immediately after transcription.
 
-- Speech transcription defaults to the multilingual Whisper base model with CPU int8 inference.
-- The transcription adapter uses local-files-only mode; it does not download models at runtime.
-- The project still needs a setup/cache step for the model, an audio stream from the selected glasses board, wake-word detection, and end-to-end latency tests.
-- eSpeak NG is a functional offline fallback, not a promise of natural Telugu. Test installed Telugu voice support on the actual laptop. If quality is poor, display the text answer rather than misrepresenting voice quality.
-- No always-listening loop or hardware microphone integration is claimed yet.
+The wake phrase is configurable in the dashboard and stored locally. The default phrase "hey glasses" is only a placeholder until the user sets their chosen phrase. After detection, the system collects transcript chunks until a pause, then processes the question. Visual phrases trigger one-shot camera capture only when dashboard permission and the physical switch are enabled.
+
+## Output
+Piper neural voice assets are cached locally:
+- English: en_US-lessac-medium
+- Telugu: te_IN-maya-medium
+
+The assistant speaks a short answer and exposes the full answer in dashboard text. Windows SAPI and eSpeak NG are fallback engines. Voice quality, Telugu pronunciation, and end-to-end latency are checked during setup and must be rehearsed on the target machine.
+
+No cloud speech API is used.
