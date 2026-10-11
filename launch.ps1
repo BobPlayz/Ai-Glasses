@@ -13,7 +13,7 @@ foreach ($required in @("qwen2.5:1.5b", "qwen2.5:0.5b", "moondream:1.8b")) {
     if ($models -notmatch [regex]::Escape($required)) { throw "Required local model $required is missing. Run .\setup.ps1." }
 }
 if (-not (Test-Path (Join-Path $PSScriptRoot "models\whisper"))) { throw "Whisper model cache missing. Run .\setup.ps1." }
-foreach ($voice in @("en_US-lessac-medium.onnx", "en_US-lessac-medium.onnx.json", "te_IN-maya-medium.onnx", "te_IN-maya-medium.onnx.json")) {
+foreach ($voice in @("en_GB-alan-medium.onnx", "en_GB-alan-medium.onnx.json", "te_IN-maya-medium.onnx", "te_IN-maya-medium.onnx.json")) {
     if (-not (Test-Path (Join-Path $PSScriptRoot ("models\tts\" + $voice)))) { throw "Offline voice asset $voice is missing. Run .\setup.ps1." }
 }
 $tesseract = Get-Command tesseract -ErrorAction SilentlyContinue
