@@ -257,6 +257,15 @@ void checkCommand() {
   postStatus();
 }
 
+void microphoneTask(void* parameter) {
+  for (;;) {
+    if (microphoneReady && WiFi.status() == WL_CONNECTED) {
+      sendMicrophoneChunk();
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(PRIVACY_SWITCH_PIN, INPUT_PULLUP);
@@ -294,6 +303,9 @@ void setup() {
   microphoneReady = initMicrophone();
   Serial.printf("Microphone: %s\\n", microphoneReady ? "ready" : "unavailable");
   postStatus();
+  if (microphoneReady) {
+    xTaskCreatePinnedToCore(microphoneTask, "glasses-mic", 8192, nullptr, 1, nullptr, 0);
+  }
 }
 
 void loop() {
@@ -324,7 +336,5 @@ void loop() {
     lastCommand = now;
     if (privacySwitchEnabled() && cameraReady) checkCommand();
   }
-  // Audio is sent as short WAV chunks. The server processes it locally in RAM
-  // and deletes temporary files immediately; the firmware never stores audio.
-  sendMicrophoneChunk();
+  // Audio streaming runs in a separate task so camera polling remains responsive.
 }
