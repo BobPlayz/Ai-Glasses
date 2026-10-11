@@ -202,7 +202,7 @@ def status() -> dict:
         "mode": "local-only",
         "language_model": ", ".join(models) if model_status["available"] and models else "Ollama unavailable or models not downloaded",
         "speech_recognition": "cached local Whisper; live voice requires the paired device microphone",
-        "text_to_speech": "cached Piper neural English/Telugu voices; Windows SAPI/eSpeak fallback",
+        "text_to_speech": "Fish Audio selected English voice when configured (online); offline Kokoro/Piper fallback and Telugu Piper voice",
         "vision_ocr": "local Tesseract English/Telugu OCR + Ollama vision model",
         "glasses_device": "connected" if device_fresh else "not connected",
         "camera": "capture allowed" if _dashboard_camera_enabled and device_fresh and _last_device_status.get("camera_enabled") and _last_device_status.get("privacy_switch_enabled") else "capture disabled / unverified",
