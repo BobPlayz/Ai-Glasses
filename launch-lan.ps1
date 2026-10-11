@@ -14,6 +14,11 @@ foreach ($required in @("qwen2.5:1.5b", "qwen2.5:0.5b", "moondream:1.8b")) {
 foreach ($voice in @("en_US-lessac-medium.onnx", "en_US-lessac-medium.onnx.json", "te_IN-maya-medium.onnx", "te_IN-maya-medium.onnx.json")) {
     if (-not (Test-Path (Join-Path $PSScriptRoot ("models\tts\" + $voice)))) { throw "Offline voice asset $voice is missing. Run .\setup.ps1." }
 }
+$tesseract = Get-Command tesseract -ErrorAction SilentlyContinue
+if (-not $tesseract -and -not (Test-Path "C:\Program Files\Tesseract-OCR\tesseract.exe")) { throw "Local Tesseract OCR is missing. Run .\setup.ps1." }
+foreach ($lang in @("eng", "tel")) {
+    if (-not (Test-Path (Join-Path $PSScriptRoot ("models\tesseract\tessdata\" + $lang + ".traineddata")))) { throw "OCR language data $lang is missing. Run .\setup.ps1." }
+}
 
 Write-Host "LAN mode exposes the dashboard to devices on your current network." -ForegroundColor Yellow
 Write-Host "Use only a trusted private Wi-Fi/hotspot. Do not use public Wi-Fi." -ForegroundColor Yellow
