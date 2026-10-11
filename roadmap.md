@@ -314,3 +314,38 @@ The project is demo-ready when all of the following are true:
 - Unit tests, compilation checks, firmware build, and current CI checks pass.
 - The laptop-only demo works without internet after initial downloads.
 - Physical hardware claims are limited to behavior actually tested on the exact board.
+
+---
+
+## Conversation evidence log (11 October 2026)
+
+This section records the concrete evidence collected while debugging the phone-camera pipeline.
+
+### Confirmed on the user's Windows laptop
+- `curl http://127.0.0.1:11434/api/tags` returned a model list including `moondream:1.8b` and its `vision` capability.
+- `ollama ps` showed Moondream running on CPU at times, and later showed `Stopping...`. That state alone is not sufficient to identify the failure.
+- A text-only `ollama run moondream:1.8b "Describe a red apple."` returned a textual description. This verifies text prompt response, not image understanding.
+- A first hand-written curl test failed with `illegal base64 data at input byte 6` because the request still contained the literal placeholder `BASE64_IMAGE_HERE`. This was a malformed test payload, not a model failure.
+- A PowerShell command then generated a 320 × 200 PNG containing red text `RED APPLE`, base64-encoded it, and sent it to Ollama `/api/chat`. The response included `"content": "!!!RED APPLE!!!"` and `"done": true`. Total duration was about 27.6 seconds, with about 5.8 seconds reported for model loading.
+- The app's phone-camera endpoint repeatedly returned HTTP 503 in the dashboard server log.
+- The latest app-level error shown was `The local vision model returned no description. Please try the image again.`
+
+### Interpretation
+The direct generated-image test is a successful baseline. The remaining bug is somewhere between the app's input image and its interpretation of the Ollama response, or in the particular image/prompt used by the app. The evidence does not yet establish whether the phone image is valid, whether the app receives an empty answer twice, or whether a second request fails and is swallowed by the retry handler.
+
+### Next diagnostic change
+Improve the app's retry handling before further manual testing:
+- Preserve the retry's HTTP status and response body when Ollama returns an HTTP error.
+- Preserve timeout/connection exception details from the retry request.
+- Record safe per-attempt diagnostics (elapsed time, model name, image byte count after preprocessing, response status, and whether `message.content` is non-empty).
+- Never log image base64 data, captured image contents, PINs, or device tokens.
+- Add tests for non-empty response, empty response then retry success, empty response twice, HTTP error on either attempt, timeout on either attempt, and invalid JSON.
+- Add an application-level test that feeds the generated PNG into `ask_image_local`; the direct curl test alone must not be the acceptance test.
+
+### Acceptance test for closing this bug
+1. The generated PNG succeeds through `ask_image_local`.
+2. The same function succeeds with a valid phone snapshot.
+3. `POST /api/phone-camera/analyze` returns HTTP 200 and a non-empty answer.
+4. A deliberately simulated Ollama failure returns an actionable error rather than a generic empty-description message.
+5. The test suite and current CI pass after the fix.
+
