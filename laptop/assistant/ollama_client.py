@@ -87,6 +87,7 @@ def ask_local(question: str, memories: list[str] | None = None) -> ModelReply:
             {
                 "model": model,
                 "stream": False,
+                "keep_alive": "0",
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": question},
