@@ -1,35 +1,82 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import tempfile
 import threading
+import wave
+from pathlib import Path
 
 
 class SpeechOutputError(RuntimeError):
     pass
 
 
-_speech_lock = threading.Lock()
+ROOT = Path(__file__).resolve().parents[2]
+VOICE_DIR = ROOT / "models" / "tts"
+_voice_cache: dict[str, object] = {}
+_voice_lock = threading.Lock()
+
+
+def _is_telugu(text: str) -> bool:
+    return any("\u0c00" <= char <= "\u0c7f" for char in text)
+
+
+def _speak_with_piper(text: str) -> dict | None:
+    """Prefer cached neural voices so both English and Telugu work offline."""
+    voice_key = "te_IN-maya-medium" if _is_telugu(text) else "en_US-lessac-medium"
+    model_path = VOICE_DIR / f"{voice_key}.onnx"
+    config_path = VOICE_DIR / f"{voice_key}.onnx.json"
+    if not model_path.is_file() or not config_path.is_file():
+        return None
+
+    try:
+        from piper import PiperVoice
+        import winsound
+
+        with _voice_lock:
+            voice = _voice_cache.get(voice_key)
+            if voice is None:
+                voice = PiperVoice.load(str(model_path), config_path=str(config_path))
+                _voice_cache[voice_key] = voice
+
+        with tempfile.NamedTemporaryFile(prefix="glasses-tts-", suffix=".wav", delete=False) as temp:
+            output_path = Path(temp.name)
+        try:
+            with wave.open(str(output_path), "wb") as wav_file:
+                voice.synthesize_wav(text[:1200], wav_file)
+            winsound.PlaySound(str(output_path), winsound.SND_FILENAME)
+        finally:
+            output_path.unlink(missing_ok=True)
+        return {
+            "spoken": True,
+            "engine": "Piper neural TTS",
+            "voice": voice_key,
+            "offline": True,
+        }
+    except Exception:
+        return None
 
 
 def speak_local(text: str) -> dict:
-    """Speak offline using Windows' installed voices, then eSpeak NG if available.
-
-    Voice quality and Telugu availability depend on voices installed on the target
-    computer. This function never uses a cloud TTS API.
-    """
+    """Speak using cached offline neural voices; use installed offline voices as fallback."""
     text = text.strip()
     if not text:
         return {"spoken": False, "reason": "empty_text"}
 
-    # SAPI5 on Windows often provides more natural installed voices than eSpeak.
+    piper_result = _speak_with_piper(text)
+    if piper_result:
+        return piper_result
+
+    # Windows SAPI is an offline fallback when Piper voice assets are unavailable.
     try:
         import pyttsx3
-        with _speech_lock:
+        with _voice_lock:
             engine = pyttsx3.init()
             voices = engine.getProperty("voices") or []
+            requested_telugu = _is_telugu(text)
             language_hints = ("telugu", "te-in", "te_in", "tel")
-            requested_telugu = any(ch in text for ch in "తెలుగు")
             chosen = None
             if requested_telugu:
                 for voice in voices:
@@ -38,7 +85,6 @@ def speak_local(text: str) -> dict:
                         chosen = voice
                         break
             if chosen is None and voices:
-                # Prefer an Indian English voice for English or when Telugu is absent.
                 for voice in voices:
                     searchable = (str(getattr(voice, "id", "")) + " " + str(getattr(voice, "name", ""))).casefold()
                     if "india" in searchable or "en-in" in searchable or "en_in" in searchable:
@@ -77,5 +123,5 @@ def speak_local(text: str) -> dict:
     return {
         "spoken": False,
         "reason": "no-local-speech-engine",
-        "message": "No offline speech engine is available. The answer remains available as text.",
+        "message": "No offline speech engine or cached voice is available. The answer remains available as text.",
     }
