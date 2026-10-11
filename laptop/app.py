@@ -127,7 +127,7 @@ def current_wake_phrase() -> str:
 
 
 def normalize_speech(text: str) -> str:
-    return re.sub(r"[^\w\s]", " ", text.casefold(), flags=re.UNICODE).strip()
+    return " ".join(re.sub(r"[^\w\s]", " ", text.casefold(), flags=re.UNICODE).split())
 
 
 def verify_device_token(x_device_token: str | None = Header(default=None)) -> None:
@@ -340,11 +340,12 @@ async def device_audio(request: Request) -> dict:
     phrase = current_wake_phrase()
     normalized_phrase = normalize_speech(phrase)
     if not _voice_armed:
-        index = normalized.find(normalized_phrase)
-        if index < 0:
+        if not normalized_phrase or normalized_phrase not in normalized:
             _voice_last_event = {"state": "listening", "detail": "Waiting for the configured wake phrase."}
             return {"state": "listening", "transcript": transcript, "wake_detected": False}
-        suffix = transcript[index + len(normalized_phrase):].strip(" ,.!?;:")
+        phrase_pattern = r"[\\W_]+".join(re.escape(part) for part in phrase.split())
+        phrase_match = re.search(phrase_pattern, transcript, flags=re.IGNORECASE | re.UNICODE)
+        suffix = transcript[phrase_match.end():].strip(" ,.!?;:") if phrase_match else ""
         if len(suffix.split()) < 2:
             _voice_armed = True
             _voice_last_event = {"state": "awake", "detail": "Wake phrase detected. Listening for the question."}
