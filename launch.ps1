@@ -1,9 +1,20 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
-if (-not (Test-Path $venvPython)) { throw "Environment not found. Run .\setup.ps1 first." }
-Write-Host "Starting AI Glasses local dashboard..." -ForegroundColor Cyan
-Write-Host "Dashboard: http://127.0.0.1:8765" -ForegroundColor Green
-Write-Host "Localhost only; phone/LAN access is intentionally disabled." -ForegroundColor Yellow
-Write-Host "Model, speech, vision, and device status are shown in the dashboard." -ForegroundColor Yellow
+if (-not (Test-Path $venvPython)) { throw "Python environment missing. Run .\setup.ps1 and let it finish." }
+if (-not (Test-Path (Join-Path $PSScriptRoot "data\.setup-complete"))) { throw "Full setup has not completed. Run .\setup.ps1 and let all model downloads and firmware compilation finish." }
+if (-not (Test-Path (Join-Path $PSScriptRoot ".dashboard-pin"))) { throw "Dashboard PIN missing. Run .\setup.ps1." }
+if (-not (Test-Path (Join-Path $PSScriptRoot ".device-token"))) { throw "Device token missing. Run .\setup.ps1." }
+
+$ollama = Get-Command ollama -ErrorAction SilentlyContinue
+if (-not $ollama) { throw "Ollama is unavailable in this PowerShell session. Reopen PowerShell and run .\setup.ps1." }
+$models = (& ollama list | Out-String)
+foreach ($required in @("qwen2.5:1.5b", "qwen2.5:0.5b", "moondream:1.8b")) {
+    if ($models -notmatch [regex]::Escape($required)) { throw "Required local model $required is missing. Run .\setup.ps1." }
+}
+if (-not (Test-Path (Join-Path $PSScriptRoot "models\whisper"))) { throw "Whisper model cache missing. Run .\setup.ps1." }
+
+Write-Host "All software/model preflight checks passed." -ForegroundColor Green
+Write-Host "Dashboard: http://127.0.0.1:8765" -ForegroundColor Cyan
+Write-Host "Localhost mode only. Use launch-lan.ps1 for PIN-protected phone access on a trusted network." -ForegroundColor Yellow
 & $venvPython -m uvicorn laptop.app:app --host 127.0.0.1 --port 8765
