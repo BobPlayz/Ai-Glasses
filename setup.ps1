@@ -117,6 +117,10 @@ Write-Host "Compiling candidate ESP32-S3 firmware..." -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot ".venv\Scripts\pio.exe") run -d (Join-Path $PSScriptRoot "firmware\xiao-esp32s3-sense")
 if ($LASTEXITCODE -ne 0) { throw "Candidate firmware compile failed. Do not launch the full project until the compile error is fixed." }
 
+Write-Host "Testing local text models, vision, and OCR end to end..." -ForegroundColor Cyan
+& $venvPython (Join-Path $PSScriptRoot "scripts\verify_local_models.py")
+if ($LASTEXITCODE -ne 0) { throw "Local AI integration preflight failed. Fix the reported component and rerun setup." }
+
 Write-Host "Verifying cached Whisper model works offline..." -ForegroundColor Cyan
 & $venvPython -c "from faster_whisper import WhisperModel; import os; WhisperModel('base', device='cpu', compute_type='int8', download_root=os.environ['GLASSES_MODEL_CACHE'], local_files_only=True)"
 if ($LASTEXITCODE -ne 0) { throw "Offline Whisper cache verification failed." }
