@@ -18,7 +18,7 @@ static constexpr unsigned long STATUS_INTERVAL_MS = 2000;
 static constexpr unsigned long COMMAND_INTERVAL_MS = 300;
 static constexpr size_t MAX_JPEG_BYTES = 8 * 1024 * 1024;
 static constexpr uint32_t MIC_SAMPLE_RATE = 16000;
-static constexpr size_t MIC_SAMPLES = 16000; // one second, mono, 16-bit PCM
+static constexpr size_t MIC_SAMPLES = 32000; // two seconds, mono, 16-bit PCM
 
 static unsigned long lastStatus = 0;
 static unsigned long lastCommand = 0;
