@@ -40,6 +40,7 @@ _last_device_status: dict = {"connected": False}
 _last_frame: dict | None = None
 _dashboard_camera_enabled = False
 _voice_armed = False
+_voice_question_parts: list[str] = []
 _voice_last_event: dict = {"state": "idle", "detail": "No device audio received yet."}
 
 
@@ -338,31 +339,40 @@ async def device_audio(request: Request) -> dict:
     finally:
         path.unlink(missing_ok=True)
 
+    global _voice_question_parts
     transcript = (result.get("text") or "").strip()
     if not transcript:
-        _voice_last_event = {"state": "listening", "detail": "No speech detected in the latest audio chunk."}
-        return {"state": "listening", "transcript": "", "wake_detected": False}
+        if _voice_armed and _voice_question_parts:
+            question = " ".join(_voice_question_parts).strip()
+            _voice_question_parts = []
+            _voice_armed = False
+            _voice_last_event = {"state": "thinking", "detail": "Question captured. Running local inference."}
+        else:
+            _voice_last_event = {"state": "listening", "detail": "No speech detected in the latest audio chunk."}
+            return {"state": "listening", "transcript": "", "wake_detected": False}
 
-    normalized = normalize_speech(transcript)
-    phrase = current_wake_phrase()
-    normalized_phrase = normalize_speech(phrase)
-    if not _voice_armed:
-        if not normalized_phrase or normalized_phrase not in normalized:
-            _voice_last_event = {"state": "listening", "detail": "Waiting for the configured wake phrase."}
-            return {"state": "listening", "transcript": transcript, "wake_detected": False}
-        phrase_pattern = r"[\W_]+".join(re.escape(part) for part in phrase.split())
-        phrase_match = re.search(phrase_pattern, transcript, flags=re.IGNORECASE | re.UNICODE)
-        suffix = transcript[phrase_match.end():].strip(" ,.!?;:") if phrase_match else ""
-        if len(suffix.split()) < 2:
-            _voice_armed = True
-            _voice_last_event = {"state": "awake", "detail": "Wake phrase detected. Listening for the question."}
-            return {"state": "awake", "transcript": transcript, "wake_detected": True}
-        transcript = suffix
-        _voice_armed = False
     else:
-        _voice_armed = False
+        normalized = normalize_speech(transcript)
+        phrase = current_wake_phrase()
+        normalized_phrase = normalize_speech(phrase)
+        if not _voice_armed:
+            if not normalized_phrase or normalized_phrase not in normalized:
+                _voice_last_event = {"state": "listening", "detail": "Waiting for the configured wake phrase."}
+                return {"state": "listening", "transcript": transcript, "wake_detected": False}
+            phrase_pattern = r"[\\W_]+".join(re.escape(part) for part in phrase.split())
+            phrase_match = re.search(phrase_pattern, transcript, flags=re.IGNORECASE | re.UNICODE)
+            suffix = transcript[phrase_match.end():].strip(" ,.!?;:") if phrase_match else ""
+            _voice_armed = True
+            _voice_question_parts = [suffix] if len(suffix.split()) >= 2 else []
+            _voice_last_event = {"state": "awake", "detail": "Wake phrase detected. Listening until you pause."}
+            return {"state": "awake", "transcript": transcript, "wake_detected": True}
+        _voice_question_parts.append(transcript)
+        _voice_last_event = {"state": "collecting", "detail": "Collecting question audio until a pause is detected."}
+        return {"state": "collecting", "transcript": transcript, "wake_detected": False}
 
-    question = transcript.strip()
+    if not question:
+        _voice_last_event = {"state": "listening", "detail": "No question text was recognized."}
+        return {"state": "listening", "transcript": "", "wake_detected": False}
     memories = search_memories(DB_PATH, question)
     try:
         reply = await run_in_threadpool(ask_local, question, memories)
