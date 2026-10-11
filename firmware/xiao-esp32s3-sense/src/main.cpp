@@ -25,6 +25,7 @@ static unsigned long lastCommand = 0;
 static bool cameraReady = false;
 static bool indicatorOn = false;
 static bool microphoneReady = false;
+static bool dashboardCameraAllowed = false;
 static int16_t* microphoneSamples = nullptr;
 
 bool privacySwitchEnabled() {
@@ -238,13 +239,22 @@ void checkCommand() {
 
   JsonDocument doc;
   if (deserializeJson(doc, body) != DeserializationError::Ok) return;
-  if (doc["capture"].isNull()) return;
-  String requestId = doc["capture"]["id"] | "";
-  if (requestId.isEmpty()) return;
-  if (!privacySwitchEnabled() || !cameraReady) {
-    Serial.println("Capture ignored: privacy switch is off or camera unavailable.");
+  dashboardCameraAllowed = doc["camera_allowed"] | false;
+  if (!dashboardCameraAllowed || !privacySwitchEnabled()) {
+    if (cameraReady) {
+      esp_camera_deinit();
+      cameraReady = false;
+      postStatus();
+    }
     return;
   }
+  if (!cameraReady) {
+    cameraReady = initCamera();
+    postStatus();
+  }
+  if (doc["capture"].isNull()) return;
+  String requestId = doc["capture"]["id"] | "";
+  if (requestId.isEmpty() || !cameraReady) return;
 
   setIndicator(true);
   postStatus();
@@ -299,11 +309,9 @@ void setup() {
   Serial.print("Device IP: ");
   Serial.println(WiFi.localIP());
 
-  if (privacySwitchEnabled()) {
-    cameraReady = initCamera();
-  } else {
-    Serial.println("Privacy switch is off; camera left uninitialised.");
-  }
+  // Camera remains uninitialised until BOTH the dashboard control and physical
+  // switch allow it. The server sends camera_allowed=false by default.
+  Serial.println("Camera is disabled until dashboard control and physical switch allow it.");
   microphoneReady = initMicrophone();
   Serial.printf("Microphone: %s\\n", microphoneReady ? "ready" : "unavailable");
   postStatus();
@@ -326,9 +334,6 @@ void loop() {
       Serial.println("Privacy switch off: camera driver stopped.");
       postStatus();
     }
-  } else if (!cameraReady) {
-    cameraReady = initCamera();
-    postStatus();
   }
 
   unsigned long now = millis();
@@ -338,7 +343,7 @@ void loop() {
   }
   if (now - lastCommand >= COMMAND_INTERVAL_MS) {
     lastCommand = now;
-    if (privacySwitchEnabled() && cameraReady) checkCommand();
+    checkCommand();
   }
   // Audio streaming runs in a separate task so camera polling remains responsive.
 }
