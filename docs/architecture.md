@@ -1,17 +1,16 @@
 # Architecture
 
-The Windows laptop is the compute host. The glasses board handles sensors and transports frames/audio over the local network. The core assistant must not require cloud APIs.
+The Windows laptop is the local compute host. The candidate Seeed XIAO ESP32-S3 Sense handles camera and microphone input over the trusted local Wi-Fi network.
 
-1. Device firmware: camera, microphone, visible activity indicator, physical privacy input, Wi-Fi transport.
-2. Laptop API: FastAPI service, local dashboard, authenticated device endpoints.
-3. Speech: local wake-word detector, multilingual English/Telugu ASR, local TTS.
-4. Language model: small quantized model chosen after CPU/RAM benchmarking.
-5. Vision: local image question answering and OCR; capture only after an explicit visual question.
-6. Memory: SQLite for useful facts and concise conversation summaries.
-7. Dashboard: laptop first; phone access only after authentication and LAN tests.
+1. Device firmware: camera, PDM microphone, visible camera-activity indicator, physical privacy-switch input, Wi-Fi transport.
+2. Laptop API: FastAPI service, local dashboard, PIN-protected optional LAN access, authenticated device endpoints.
+3. Speech input: short WAV chunks from the device, cached multilingual faster-whisper transcription, configurable wake phrase, question collection until a pause.
+4. Language model: Ollama local API, qwen2.5:1.5b primary and qwen2.5:0.5b fallback. Local model calls are restricted to loopback and unload after responses to limit RAM pressure.
+5. Vision: a visual question triggers one-shot camera capture; local Moondream answers the question and Tesseract provides English/Telugu OCR.
+6. Speech output: cached Piper neural English and Telugu voices; Windows SAPI/eSpeak fallback; short spoken answers while full answers remain text.
+7. Memory: SQLite useful facts and opt-in short summaries. Full voice transcripts are not persisted by default.
+8. Dashboard: laptop localhost mode by default; phone access through PIN-protected LAN mode on a trusted private network.
 
-The current app binds to 127.0.0.1 only. Do not bind to 0.0.0.0 until authentication, device pairing, and firewall behavior are implemented and tested. Local Wi-Fi is not automatically trusted.
+The laptop has an Intel Core i7-8650U and 8 GB RAM. Model response latency and memory pressure must be measured on the target laptop. The system uses local-only inference after initial downloads.
 
-The laptop has an Intel Core i7-8650U and 8 GB RAM. Start with small quantized models and measure latency/RAM. Avoid loading speech, vision, and LLM models concurrently if memory pressure is high.
-
-Current state: dashboard/API and SQLite memory scaffold only. No LLM, ASR, TTS, camera, microphone, firmware, or device transport is integrated yet.
+Current status: source integration is committed. Full setup runs local model, OCR, TTS, and firmware compile preflight checks. Actual camera/microphone behavior still requires the selected board to be purchased, wired, and tested.
