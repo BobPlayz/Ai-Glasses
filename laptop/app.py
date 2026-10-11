@@ -188,6 +188,7 @@ def dashboard() -> str:
 def status() -> dict:
     model_status = service_status()
     models = model_status["models"]
+    device_fresh = bool(_last_device_status.get("connected")) and time.time() - _last_device_status.get("updated_at", 0) < 8
     return {
         "app": "running",
         "mode": "local-only",
@@ -195,8 +196,8 @@ def status() -> dict:
         "speech_recognition": "cached local Whisper; live voice requires the paired device microphone",
         "text_to_speech": "cached Piper neural English/Telugu voices; Windows SAPI/eSpeak fallback",
         "vision_ocr": "local Tesseract English/Telugu OCR + Ollama vision model",
-        "glasses_device": "connected" if _last_device_status.get("connected") and time.time() - _last_device_status.get("updated_at", 0) < 8 else "not connected",
-        "camera": "capture allowed" if _dashboard_camera_enabled and _last_device_status.get("camera_enabled") and _last_device_status.get("privacy_switch_enabled") else "capture disabled / unverified",
+        "glasses_device": "connected" if device_fresh else "not connected",
+        "camera": "capture allowed" if _dashboard_camera_enabled and device_fresh and _last_device_status.get("camera_enabled") and _last_device_status.get("privacy_switch_enabled") else "capture disabled / unverified",
         "dashboard_camera_enabled": _dashboard_camera_enabled,
         "microphone": "streaming local audio" if _last_device_status.get("microphone_ready") and time.time() - _last_device_status.get("updated_at", 0) < 8 else "not connected",
         "wake_phrase": current_wake_phrase(),
@@ -205,7 +206,7 @@ def status() -> dict:
         "voice_answer": _voice_last_event.get("answer", ""),
         "voice_ocr_text": _voice_last_event.get("ocr_text", ""),
         "last_indicator_on_at": _last_indicator_on_at or "no capture indicator event yet",
-        "privacy_indicator": "on" if _last_device_status.get("indicator_on") else "off / not verified",
+        "privacy_indicator": ("on" if _last_device_status.get("indicator_on") else "off") if device_fresh else "unverified (device heartbeat stale)",
         "memory": "local SQLite enabled",
         "network_dashboard": "PIN protected" if dashboard_pin_required() else "localhost mode",
     }
