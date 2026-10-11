@@ -84,7 +84,7 @@ def ask_local(
         "Do not repeat greetings, narrate your reasoning, or over-explain simple answers. "
         "Never claim to see an image unless image content is explicitly provided. "
         "Never claim an action, device state, or live fact that has not been verified. "
-        "These are relevant user-approved local memory notes:\\n"
+        "These are relevant user-approved local memory notes:\n"
         + (memory_lines or "(no relevant saved notes)")
     )
 
