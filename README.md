@@ -8,8 +8,9 @@ A local-first smart-glasses prototype for a school exhibition. The Windows lapto
 - Local Ollama text assistant with primary and fallback models
 - SQLite useful-fact memory and opt-in short conversation summaries
 - Offline multilingual Whisper transcription adapter and cached-model setup
-- Offline Windows voice output via installed SAPI voices, with eSpeak NG fallback
-- Local vision adapter for an explicitly supplied image
+- Cached Piper neural speech in English and Telugu, with Windows SAPI/eSpeak fallback
+- Local Tesseract OCR using English and Telugu language data
+- Local vision adapter for an explicitly supplied image, combined with OCR results
 - Dashboard camera enable/disable control, default off
 - Device API with pairing token, camera command queue, and one-shot JPEG upload
 - Candidate ESP32-S3 camera, privacy-switch, indicator, and microphone firmware
@@ -24,6 +25,7 @@ A local-first smart-glasses prototype for a school exhibition. The Windows lapto
 - Internet for first-time dependencies and model caching
 - Ollama
 - For physical glasses: compatible ESP32-S3 camera/microphone board, USB cable, switch, indicator LED and resistor, safe mounting, and wiring verified for the exact board revision
+- Tesseract OCR engine, installed by setup
 
 ## Setup
 
@@ -52,6 +54,8 @@ Find the laptop IPv4 address using ipconfig, then open http://LAPTOP-IP:8765 on 
 - Text fallback: qwen2.5:0.5b
 - Speech: faster-whisper base multilingual model
 - Vision candidate: moondream:1.8b
+- OCR: local Tesseract with eng+tel data
+- TTS: Piper en_US-lessac-medium and te_IN-maya-medium voices
 
 These are configuration candidates. Actual model latency, memory pressure, Telugu recognition quality, and voice availability must be verified on the target laptop. The app never downloads models while answering a question.
 
