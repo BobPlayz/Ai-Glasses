@@ -390,7 +390,7 @@ async def vision(question: str = "Describe the main objects and read visible tex
 
 @app.post("/api/device/audio", dependencies=[Depends(verify_device_token)])
 async def device_audio(request: Request) -> dict:
-    global _voice_armed, _voice_last_event
+    global _voice_armed, _voice_last_event, _voice_question_parts
     if not _dashboard_microphone_enabled:
         raise HTTPException(status_code=403, detail="Device microphone is disabled in the dashboard.")
     raw = await request.body()
@@ -418,7 +418,6 @@ async def device_audio(request: Request) -> dict:
         _voice_last_event = {"state": "disabled", "detail": "Microphone permission was revoked while processing audio."}
         return {"state": "disabled", "transcript": "", "wake_detected": False}
 
-    global _voice_question_parts
     transcript = (result.get("text") or "").strip()
     if not transcript:
         if _voice_armed and _voice_question_parts:
