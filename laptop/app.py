@@ -4,7 +4,7 @@ import asyncio
 import hmac
 import json
 import os
-import secrets
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,7 @@ TEMP_DIR = DATA_DIR / "temp"
 DB_PATH = DATA_DIR / "memory.sqlite3"
 PIN_PATH = ROOT / ".dashboard-pin"
 DEVICE_TOKEN_PATH = ROOT / ".device-token"
+WAKE_PHRASE_PATH = DATA_DIR / "wake-phrase.txt"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -36,6 +37,8 @@ _capture_lock = asyncio.Lock()
 _capture_request: dict | None = None
 _last_device_status: dict = {"connected": False}
 _last_frame: dict | None = None
+_voice_armed = False
+_voice_last_event: dict = {"state": "idle", "detail": "No device audio received yet."}
 
 
 def connect_db() -> sqlite3.Connection:
@@ -90,6 +93,10 @@ class CaptureRequest(BaseModel):
     question: Annotated[str, Field(min_length=1, max_length=500)]
 
 
+class WakePhraseInput(BaseModel):
+    phrase: Annotated[str, Field(min_length=3, max_length=80)]
+
+
 def read_secret(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8").strip()
@@ -109,6 +116,18 @@ def verify_dashboard_pin(x_dashboard_pin: str | None = Header(default=None)) -> 
         raise HTTPException(status_code=503, detail="LAN mode is blocked until setup creates .dashboard-pin.")
     if not x_dashboard_pin or not hmac.compare_digest(x_dashboard_pin, expected):
         raise HTTPException(status_code=401, detail="Dashboard PIN is missing or incorrect.")
+
+
+def current_wake_phrase() -> str:
+    try:
+        phrase = WAKE_PHRASE_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        phrase = ""
+    return phrase or "hey glasses"
+
+
+def normalize_speech(text: str) -> str:
+    return re.sub(r"[^a-z0-9\\s]", " ", text.casefold()).strip()
 
 
 def verify_device_token(x_device_token: str | None = Header(default=None)) -> None:
@@ -141,7 +160,9 @@ def status() -> dict:
         "vision_ocr": "local Ollama vision adapter; model must be cached",
         "glasses_device": "connected" if _last_device_status.get("connected") and time.time() - _last_device_status.get("updated_at", 0) < 8 else "not connected",
         "camera": "capture allowed" if _last_device_status.get("camera_enabled") and _last_device_status.get("privacy_switch_enabled") else "capture disabled / unverified",
-        "microphone": "ready" if _last_device_status.get("microphone_ready") else "not connected",
+        "microphone": "streaming local audio" if _last_device_status.get("microphone_ready") else "not connected",
+        "wake_phrase": current_wake_phrase(),
+        "voice_state": _voice_last_event.get("state", "idle"),
         "privacy_indicator": "on" if _last_device_status.get("indicator_on") else "off / not verified",
         "memory": "local SQLite enabled",
         "network_dashboard": "PIN protected" if dashboard_pin_required() else "localhost mode",
@@ -252,6 +273,20 @@ async def transcribe_audio(file: UploadFile = File(...)) -> dict:
         await file.close()
 
 
+@app.get("/api/wake-phrase", dependencies=[Depends(verify_dashboard_pin)])
+def get_wake_phrase() -> dict:
+    return {"phrase": current_wake_phrase(), "default_is_placeholder": not WAKE_PHRASE_PATH.exists()}
+
+
+@app.post("/api/wake-phrase", dependencies=[Depends(verify_dashboard_pin)])
+def set_wake_phrase(payload: WakePhraseInput) -> dict:
+    phrase = payload.phrase.strip()
+    if not phrase or len(phrase.split()) > 8:
+        raise HTTPException(status_code=422, detail="Wake phrase must contain 1 to 8 words.")
+    WAKE_PHRASE_PATH.write_text(phrase, encoding="utf-8")
+    return {"phrase": phrase, "saved_locally": True}
+
+
 @app.post("/api/speech/speak", dependencies=[Depends(verify_dashboard_pin)])
 def speak(payload: MemoryInput) -> dict:
     try:
@@ -276,6 +311,70 @@ async def vision(question: str = "Describe the main objects and read visible tex
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     finally:
         await file.close()
+
+
+@app.post("/api/device/audio", dependencies=[Depends(verify_device_token)])
+async def device_audio(request: Request) -> dict:
+    global _voice_armed, _voice_last_event
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Audio chunk is empty.")
+    if len(raw) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Audio chunk exceeds 2 MiB.")
+    if not raw.startswith(b"RIFF") or raw[8:12] != b"WAVE":
+        raise HTTPException(status_code=415, detail="Device audio must be a WAV file.")
+    path = TEMP_DIR / f"mic-{uuid4().hex}.wav"
+    try:
+        path.write_bytes(raw)
+        result = transcribe_audio_file(path, model_size="base")
+    except SpeechError as exc:
+        _voice_last_event = {"state": "speech_unavailable", "detail": str(exc)}
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        path.unlink(missing_ok=True)
+
+    transcript = (result.get("text") or "").strip()
+    if not transcript:
+        _voice_last_event = {"state": "listening", "detail": "No speech detected in the latest audio chunk."}
+        return {"state": "listening", "transcript": "", "wake_detected": False}
+
+    normalized = normalize_speech(transcript)
+    phrase = current_wake_phrase()
+    normalized_phrase = normalize_speech(phrase)
+    if not _voice_armed:
+        index = normalized.find(normalized_phrase)
+        if index < 0:
+            _voice_last_event = {"state": "listening", "detail": "Waiting for the configured wake phrase."}
+            return {"state": "listening", "transcript": transcript, "wake_detected": False}
+        suffix = transcript[index + len(normalized_phrase):].strip(" ,.!?;:")
+        if len(suffix.split()) < 2:
+            _voice_armed = True
+            _voice_last_event = {"state": "awake", "detail": "Wake phrase detected. Listening for the question."}
+            return {"state": "awake", "transcript": transcript, "wake_detected": True}
+        transcript = suffix
+        _voice_armed = False
+    else:
+        _voice_armed = False
+
+    question = transcript.strip()
+    memories = search_memories(DB_PATH, question)
+    try:
+        reply = ask_local(question, memories)
+    except OllamaError as exc:
+        _voice_last_event = {"state": "error", "detail": str(exc)}
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    save_conversation(question, reply.text, reply.model, False)
+    speech = speak_local(reply.text[:700])
+    _voice_last_event = {"state": "answered", "detail": f"Answered using {reply.model}."}
+    return {
+        "state": "answered",
+        "transcript": question,
+        "answer": reply.text,
+        "model": reply.model,
+        "used_fallback": reply.used_fallback,
+        "speech": speech,
+        "offline": True,
+    }
 
 
 @app.post("/api/device/status", dependencies=[Depends(verify_device_token)])
