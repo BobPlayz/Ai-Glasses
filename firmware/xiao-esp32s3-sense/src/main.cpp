@@ -7,7 +7,7 @@
 #if __has_include("secrets.h")
 #include "secrets.h"
 #else
-#include "secrets.example.h"
+#include "../secrets.example.h"
 #endif
 
 // Candidate firmware for Seeed XIAO ESP32-S3 Sense.
