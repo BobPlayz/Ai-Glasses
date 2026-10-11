@@ -53,8 +53,8 @@ def _post_json(path: str, payload: dict, timeout: float) -> dict:
 
 
 def service_status(timeout: float = 2.0) -> dict:
-    request = urllib.request.Request(_ollama_url("/api/tags"), method="GET")
     try:
+        request = urllib.request.Request(_ollama_url("/api/tags"), method="GET")
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
         return {"available": True, "models": [m.get("name", "") for m in data.get("models", [])]}
