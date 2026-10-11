@@ -8,7 +8,7 @@ A local-first smart-glasses prototype for a school exhibition. The Windows lapto
 - Local Ollama text assistant with primary and fallback models
 - SQLite useful-fact memory and opt-in short conversation summaries
 - Offline multilingual Whisper transcription adapter and cached-model setup
-- Cached Piper neural speech in English and Telugu, with Windows SAPI/eSpeak fallback
+- Cached Piper neural speech in British English and Telugu, with Windows SAPI/eSpeak fallback
 - Local Tesseract OCR using English and Telugu language data
 - Local vision adapter for an explicitly supplied image, combined with OCR results
 - Dashboard camera enable/disable control, default off
@@ -55,7 +55,7 @@ Find the laptop IPv4 address using ipconfig, then open http://LAPTOP-IP:8765 on 
 - Speech: faster-whisper base multilingual model
 - Vision candidate: moondream:1.8b
 - OCR: local Tesseract with eng+tel data
-- TTS: Piper en_US-lessac-medium and te_IN-maya-medium voices
+- TTS: Piper en_GB-alan-medium British English and te_IN-maya-medium Telugu voices
 
 These are configuration candidates. Actual model latency, memory pressure, Telugu recognition quality, and voice availability must be verified on the target laptop. The app never downloads models while answering a question.
 
