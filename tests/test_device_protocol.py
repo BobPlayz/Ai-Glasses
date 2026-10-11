@@ -25,7 +25,7 @@ class DeviceProtocolTests(unittest.TestCase):
             PIN_PATH.write_text(self.old_pin)
 
     def test_unicode_wake_phrase_normalization(self):
-        self.assertEqual(normalize_speech("Hey, glasses!"), "hey  glasses")
+        self.assertEqual(normalize_speech("Hey, glasses!"), "hey glasses")
         self.assertEqual(normalize_speech("హే గ్లాసెస్"), "హే గ్లాసెస్")
 
     def test_device_token_required(self):
