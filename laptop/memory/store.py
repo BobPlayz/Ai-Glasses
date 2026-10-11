@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 
@@ -10,7 +11,9 @@ def search_memories(db_path: Path, query: str, limit: int = 5) -> list[str]:
     words = {word for word in words if len(word) > 2}
     if not words:
         return []
-    with sqlite3.connect(db_path) as db:
+    # sqlite3's connection context manager handles transactions but does not close
+    # the connection. Explicitly close it so Windows can remove temporary DB files.
+    with closing(sqlite3.connect(db_path)) as db:
         rows = db.execute("SELECT content FROM memories ORDER BY id DESC LIMIT 100").fetchall()
     ranked: list[tuple[int, str]] = []
     for (content,) in rows:

@@ -42,7 +42,7 @@ def extract_text_local(image_bytes: bytes) -> str:
             if image.width * image.height > 20_000_000:
                 image.thumbnail((4000, 4000))
             languages = "eng+tel" if (TESSDATA_DIR / "tel.traineddata").is_file() else "eng"
-            config = f'--tessdata-dir "{TESSDATA_DIR}"' if TESSDATA_DIR.is_dir() else ""
+            config = f"--tessdata-dir {TESSDATA_DIR}" if TESSDATA_DIR.is_dir() else ""
             text = pytesseract.image_to_string(image, lang=languages, config=config, timeout=12)
         return text.strip()[:6000]
     except Exception:
@@ -102,5 +102,40 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
         raise VisionError("Local vision service returned invalid JSON.") from exc
     answer = result.get("message", {}).get("content", "").strip()
     if not answer:
-        raise VisionError("Local vision model returned an empty answer.")
+        # Some small local vision models occasionally return an empty message
+        # for longer prompts. Retry once with a simpler prompt before falling back.
+        retry_payload = {
+            "model": model,
+            "stream": False,
+            "keep_alive": "0",
+            "messages": [{
+                "role": "user",
+                "content": "Describe this image briefly. Read visible text if possible.",
+                "images": [base64.b64encode(image_bytes).decode("ascii")],
+            }],
+            "options": {"temperature": 0.1, "num_ctx": 2048},
+        }
+        retry_request = urllib.request.Request(
+            host + "/api/chat",
+            data=json.dumps(retry_payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(retry_request, timeout=60) as response:
+                retry_result = json.loads(response.read().decode("utf-8"))
+            answer = retry_result.get("message", {}).get("content", "").strip()
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+            answer = ""
+    if not answer and ocr_text:
+        answer = "I couldn't describe the image reliably, but I could read this text: " + ocr_text
+        return {
+            "answer": answer,
+            "ocr_text": ocr_text,
+            "model": model,
+            "offline": True,
+            "vision_fallback": True,
+        }
+    if not answer:
+        raise VisionError("The local vision model returned no description. Please try the image again.")
     return {"answer": answer, "ocr_text": ocr_text, "model": model, "offline": True}
