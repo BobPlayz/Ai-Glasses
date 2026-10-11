@@ -18,7 +18,7 @@ _synthesis_lock = threading.Lock()
 
 
 def _is_telugu(text: str) -> bool:
-    return any("\\u0c00" <= char <= "\\u0c7f" for char in text)
+    return any(0x0C00 <= ord(char) <= 0x0C7F for char in text)
 
 
 def _speak_with_piper(text: str, voice_key: str) -> dict | None:
