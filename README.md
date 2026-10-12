@@ -12,10 +12,12 @@ A local-first smart-glasses prototype for a school exhibition. The Windows lapto
 - Cached Piper neural speech in British English and Telugu, with Windows SAPI/eSpeak fallback
 - Local Tesseract OCR using English and Telugu language data
 - Local vision adapter for an explicitly supplied image, combined with OCR results
+- Experimental bounded MJPEG reader and throttled live-frame inference helper in `laptop/vision/live_stream.py` (not yet wired to the dashboard or XIAO firmware)
 - Dashboard camera enable/disable control, default off
 - Explicit device microphone enable/disable control, default off, with server-side upload rejection until opted in
 - Device API with pairing token, camera command queue, and one-shot JPEG upload
 - Candidate ESP32-S3 camera, privacy-switch, indicator, and microphone firmware
+- Hardware integration status and remaining work documented in `docs/AI_SPECTS_INTEGRATION_STATUS.md`
 - Configurable wake phrase and local audio chunk processing
 - Local-only mode and optional PIN-protected LAN dashboard mode
 - Unit tests and GitHub Actions checks
@@ -89,7 +91,7 @@ These are configuration candidates. Actual model latency, memory pressure, Telug
 - The dashboard is localhost-only by default. LAN mode requires the generated PIN.
 - Device credentials, PINs, local memory, recordings, and model files are excluded from Git.
 
-A firmware-controlled switch is not an electrical camera power disconnect. Review the wiring with a qualified adult/technician before assembly. Do not improvise lithium battery or charging circuits.
+The current firmware uses privacy-gated JPEG snapshots rather than a continuous XIAO video stream, and response speech currently plays through the laptop output rather than the MAX98357 glasses speaker. See `docs/AI_SPECTS_INTEGRATION_STATUS.md` before hardware assembly. A firmware-controlled switch is not an electrical camera power disconnect. Review the wiring with a qualified adult/technician before assembly. Do not improvise lithium battery or charging circuits.
 
 ## Tests and status
 
