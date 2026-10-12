@@ -57,3 +57,10 @@ Live vision uses sequential one-shot frames and local inference, rather than cla
 - Candidate I2S output uses GPIO4 (BCLK), GPIO5 (LRCLK/WS), and GPIO6 (DATA), corresponding to XIAO D3/D4/D5. The onboard PDM microphone remains on GPIO41/42 using I2S_NUM_0. Confirm the exact board revision and amplifier breakout labels before wiring.
 - The MAX98357 I2S amplifier needs a suitable speaker load and documented supply. Confirm the selected 2-inch woofer's impedance and power rating from its actual label/listing before power-up. Never connect the amplifier's bridged speaker outputs to ground or to a board GPIO.
 - The physical speaker, wiring, exact component compatibility, firmware upload, audio quality, and battery/power path remain unverified until parts are available and bench-tested with an experienced adult/technician.
+
+
+## Streaming voice responses
+
+The dashboard now consumes a token stream from local Ollama. It updates the answer text as tokens arrive and synthesizes each completed phrase with the local Piper voice while generation continues. Each generated WAV is played on the laptop and also placed in a bounded FIFO queue for the paired glasses speaker. This is phrase-level streaming, not word-by-word speech synthesis, because the TTS engine needs a useful phrase before producing natural audio.
+
+Install the offline voices with `scripts\\install_british_voice.ps1`. If the Piper model files are missing, the streaming voice endpoint reports the missing local voice instead of silently claiming that speech worked. The legacy one-shot response endpoint remains available.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import hmac
 import json
 import os
@@ -14,11 +15,11 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from laptop.assistant.ollama_client import OllamaError, ask_local, service_status
+from laptop.assistant.ollama_client import OllamaError, ask_local, service_status, stream_local
 from laptop.memory.store import search_memories
 from laptop.speech.speak import speak_local, synthesize_wav_local
 from laptop.speech.transcribe import SpeechError, transcribe_audio_file
@@ -45,8 +46,7 @@ _voice_armed = False
 _voice_question_parts: list[str] = []
 _voice_last_event: dict = {"state": "idle", "detail": "No device audio received yet."}
 _last_indicator_on_at: str | None = None
-_speech_queue: bytes | None = None
-_speech_queued_at = 0.0
+_speech_queue: deque[tuple[bytes, float]] = deque(maxlen=8)
 _live_vision_enabled = False
 
 
@@ -138,15 +138,17 @@ class MicrophoneControlInput(BaseModel):
     enabled: bool
 
 
-def queue_device_speech(text: str) -> bool:
-    """Queue one short, local Piper WAV for the authenticated paired device."""
-    global _speech_queue, _speech_queued_at
-    audio = synthesize_wav_local(short_speech_text(text))
+def queue_device_audio(audio: bytes) -> bool:
+    """Queue one bounded Piper WAV for the authenticated paired device."""
     if not audio or len(audio) > 900_000:
         return False
-    _speech_queue = audio
-    _speech_queued_at = time.time()
+    _speech_queue.append((audio, time.time()))
     return True
+
+
+def queue_device_speech(text: str) -> bool:
+    audio = synthesize_wav_local(short_speech_text(text))
+    return queue_device_audio(audio) if audio else False
 
 
 def read_secret(path: Path) -> str:
@@ -617,15 +619,57 @@ def device_command() -> dict:
 
 @app.get("/api/device/speech", dependencies=[Depends(verify_device_token)])
 def device_speech() -> Response:
-    global _speech_queue, _speech_queued_at
-    if not _speech_queue or time.time() - _speech_queued_at >= 30:
-        _speech_queue = None
-        _speech_queued_at = 0.0
-        return Response(status_code=204)
-    audio = _speech_queue
-    _speech_queue = None
-    _speech_queued_at = 0.0
-    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+    while _speech_queue:
+        audio, queued_at = _speech_queue.popleft()
+        if time.time() - queued_at < 30:
+            return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+    return Response(status_code=204)
+
+
+class SpeechRenderInput(BaseModel):
+    text: Annotated[str, Field(min_length=1, max_length=260)]
+
+
+@app.post("/api/speech/render", dependencies=[Depends(verify_dashboard_pin)])
+async def render_speech(payload: SpeechRenderInput) -> Response:
+    text = " ".join(payload.text.split()).strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Speech text is empty.")
+    audio = await run_in_threadpool(synthesize_wav_local, text, 260)
+    if not audio:
+        raise HTTPException(status_code=503, detail="Offline Piper voice is not installed. Run scripts\\install_british_voice.ps1.")
+    queue_device_audio(audio)
+    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
+
+
+@app.post("/api/ask/stream", dependencies=[Depends(verify_dashboard_pin)])
+async def ask_stream(payload: AskInput) -> StreamingResponse:
+    question = payload.content.strip()
+    memories = search_memories(DB_PATH, question)
+
+    def events():
+        answer_parts: list[str] = []
+        model_name = ""
+        used_fallback = False
+        try:
+            for item in stream_local(question, memories, recent_conversation_context()):
+                if item["type"] == "token":
+                    answer_parts.append(item["text"])
+                    yield "data: " + json.dumps(item, ensure_ascii=False) + "\n\n"
+                elif item["type"] == "meta":
+                    model_name = item["model"]
+                    used_fallback = item.get("used_fallback", False)
+            answer = "".join(answer_parts).strip()
+            if not answer:
+                raise OllamaError("The local model returned an empty answer.")
+            save_conversation(question, answer, model_name, payload.remember_summary)
+            yield "data: " + json.dumps({"type":"done","model":model_name,"used_fallback":used_fallback,"memory_notes_used":len(memories)}, ensure_ascii=False) + "\n\n"
+        except OllamaError as exc:
+            yield "data: " + json.dumps({"type":"error","message":str(exc)}, ensure_ascii=False) + "\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control":"no-cache, no-transform","X-Accel-Buffering":"no"})
+
+
 
 
 @app.post("/api/device/live/control", dependencies=[Depends(verify_dashboard_pin)])
@@ -761,7 +805,7 @@ button,input,textarea{font:inherit;letter-spacing:inherit}button{cursor:pointer;
 <div id="connectionHelp" class="tiny" style="margin-top:8px">The glasses connect over Wi-Fi in this firmware. USB is currently for power/programming, not a live data connection.</div></section>
 <section class="extras">
 <div class="panel" id="visionPanel"><h2>Vision</h2><p class="tiny">Image uploads are analyzed locally. Glasses capture needs explicit request, dashboard permission, and the physical privacy switch.</p><label for="visionQuestion">Visual question</label><textarea id="visionQuestion" placeholder="What am I looking at?"></textarea><label for="imageFile">Choose image</label><input id="imageFile" type="file" accept="image/jpeg,image/png,image/webp,image/bmp"><button onclick="askUploadedImage()">Analyze image</button><button onclick="askGlasses()">Capture once</button><button id="liveVisionButton" onclick="toggleLiveVision()">Start live vision</button><div id="liveVisionState" class="tiny" role="status">Live vision is off.</div><div id="visionAnswer" class="out"></div></div>
-<div class="panel" id="voiceSettingsPanel"><h2>Voice & wake phrase</h2><label for="wakePhrase">Wake phrase</label><input id="wakePhrase" maxlength="80" placeholder="hey glasses"><button onclick="saveWakePhrase()">Save phrase</button><div id="wakeStatus" class="tiny" style="margin-top:8px">Loading local setting...</div><label for="speakText">Speak text</label><textarea id="speakText" placeholder="Type a short phrase to test the voice..."></textarea><button onclick="speakText()">Speak offline</button><label for="audioFile">Transcribe audio file</label><input id="audioFile" type="file" accept="audio/*"><button onclick="transcribe()">Transcribe file locally</button><div style="margin-top:10px"><button id="recordButton" onclick="startMicTest()">Record laptop mic</button><button id="stopRecordButton" onclick="stopMicTest()" disabled>Stop & transcribe</button><span id="micTestState" class="tiny">Browser mic simulator: ready</span></div><div class="tiny">Laptop-only microphone test. Audio is sent to this laptop for local transcription and temporary files are deleted.</div><div id="speechAnswer" class="out"></div></div>
+<div class="panel" id="voiceSettingsPanel"><h2>Voice & wake phrase</h2><div id="voiceState" class="tiny" role="status">Offline voice ready when Piper voices are installed.</div><label for="wakePhrase">Wake phrase</label><input id="wakePhrase" maxlength="80" placeholder="hey glasses"><button onclick="saveWakePhrase()">Save phrase</button><div id="wakeStatus" class="tiny" style="margin-top:8px">Loading local setting...</div><label for="speakText">Speak text</label><textarea id="speakText" placeholder="Type a short phrase to test the voice..."></textarea><button onclick="speakText()">Speak offline</button><label for="audioFile">Transcribe audio file</label><input id="audioFile" type="file" accept="audio/*"><button onclick="transcribe()">Transcribe file locally</button><div style="margin-top:10px"><button id="recordButton" onclick="startMicTest()">Record laptop mic</button><button id="stopRecordButton" onclick="stopMicTest()" disabled>Stop & transcribe</button><span id="micTestState" class="tiny">Browser mic simulator: ready</span></div><div class="tiny">Laptop-only microphone test. Audio is sent to this laptop for local transcription and temporary files are deleted.</div><div id="speechAnswer" class="out"></div></div>
 <div class="panel" id="privacySettingsPanel"><h2>Memory & privacy</h2><label for="memory">Save local memory</label><textarea id="memory" placeholder="A useful fact to remember..."></textarea><button onclick="saveMemory()">Save memory</button><button onclick="loadMemories()">Refresh</button><button onclick="clearMemory()">Clear all</button><div id="memories" class="out"></div><hr style="border:0;border-top:1px solid #16404d;margin:14px 0"><div class="tiny">Dashboard camera: <b id="cameraControlState">disabled</b></div><div class="tiny">Device microphone: <b id="microphoneControlState">disabled</b></div><button id="microphoneControlButton" onclick="toggleMicrophoneControl()">Enable device microphone</button><div class="tiny">Microphone uploads are blocked until you explicitly enable them here. Audio is processed locally on this laptop.</div><div class="tiny">Physical indicator: <b id="indicatorState">unverified</b></div><button id="cameraControlButton" onclick="toggleCameraControl()">Enable camera control</button><div id="privacyBadge" class="privacy tiny" style="margin-top:9px">CAMERA OFF / UNVERIFIED</div></div>
 </section><div class="tiny" style="text-align:center;margin-top:14px">LOCAL-FIRST · NO CLOUD AI · CAMERA CAPTURE IS EXPLICITLY GATED</div>
 </main>
@@ -778,7 +822,10 @@ function logActivity(message){const el=document.getElementById('activity'),p=doc
 async function api(url,options){options=options||{};let headers=Object.assign({'X-Dashboard-Pin':dashboardPin},options.headers||{});if(!(options.body instanceof FormData)&&!headers['Content-Type'])headers['Content-Type']='application/json';options.headers=headers;let r=await fetch(url,options),d;try{d=await r.json()}catch{d={detail:'Unexpected server response'}}if(r.status===401){document.getElementById('pinPanel').style.display='block';throw new Error('Dashboard PIN required. Enter it above.')}if(!r.ok)throw new Error(d.detail||'Request failed');return d}
 function savePin(){dashboardPin=document.getElementById('pin').value;sessionStorage.setItem('glasses-pin',dashboardPin);document.getElementById('pinMessage').textContent=' PIN stored for this tab.';loadStatus();loadMemories();loadWakePhrase()}
 function setTranscript(q,a,meta){document.getElementById('transcriptText').textContent='» '+q+'\n\n'+a;document.getElementById('answerMeta').textContent=meta||''}
-async function sendCommand(){let box=document.getElementById('command'),content=box.value.trim();if(!coreActive||!content||aiBusy)return;box.value='';aiBusy=true;document.getElementById('aiVal').textContent='BUSY';document.getElementById('aiBar').style.width='85%';document.getElementById('onlineState').textContent='THINKING';document.getElementById('sendButton').disabled=true;setTranscript(content,'Thinking locally...','LOCAL INFERENCE');logActivity('Question received: '+content.slice(0,90));try{let d=await api('/api/ask',{method:'POST',body:JSON.stringify({content,remember_summary:false})});latestAnswer=d.answer;setTranscript(content,d.answer,'MODEL '+d.model+(d.used_fallback?' · FALLBACK':'')+' · '+d.memory_notes_used+' MEMORY NOTES');document.getElementById('modelCaption').textContent='LOCAL AI · '+d.model;document.getElementById('onlineState').textContent='ONLINE';logActivity('Response ready using '+d.model);if(d.used_fallback)logActivity('Smaller fallback model used.')}catch(e){setTranscript(content,e.message,'REQUEST FAILED');document.getElementById('onlineState').textContent='CHECK SYSTEM';logActivity('Error: '+e.message)}finally{aiBusy=false;document.getElementById('aiVal').textContent='IDLE';document.getElementById('aiBar').style.width='12%';document.getElementById('sendButton').disabled=false}}
+let audioQueue=Promise.resolve(),speechBuffer='';
+function speakChunk(text){audioQueue=audioQueue.then(async()=>{let url='';try{const r=await fetch('/api/speech/render',{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin,'Content-Type':'application/json'},body:JSON.stringify({text})});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'Local voice unavailable')}const blob=await r.blob();url=URL.createObjectURL(blob);const audio=new Audio(url);await new Promise(resolve=>{audio.onended=resolve;audio.onerror=resolve;audio.play().catch(resolve)});}catch(e){document.getElementById('voiceState').textContent='Voice unavailable: '+e.message}finally{if(url)URL.revokeObjectURL(url)}});return audioQueue}
+function queueCompletedSpeech(force=false){let match;const boundary=/[.!?।]+(?:["')\]]*)\s+|[,;:]\s+|\n/g;while((match=boundary.exec(speechBuffer))){const end=match.index+match[0].length;const piece=speechBuffer.slice(0,end).trim();speechBuffer=speechBuffer.slice(end);boundary.lastIndex=0;if(piece.length>1)speakChunk(piece);if(!speechBuffer)break}if(force&&speechBuffer.trim()){speakChunk(speechBuffer.trim());speechBuffer=''}}
+async function sendCommand(){let box=document.getElementById('command'),content=box.value.trim();if(!coreActive||!content||aiBusy)return;box.value='';aiBusy=true;speechBuffer='';document.getElementById('aiVal').textContent='BUSY';document.getElementById('aiBar').style.width='85%';document.getElementById('onlineState').textContent='THINKING';document.getElementById('sendButton').disabled=true;document.getElementById('voiceState').textContent='Answer will speak as local tokens arrive.';setTranscript(content,'Thinking locally…','LOCAL INFERENCE');logActivity('Question received: '+content.slice(0,90));let answer='',meta=null;try{const response=await fetch('/api/ask/stream',{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin,'Content-Type':'application/json'},body:JSON.stringify({content,remember_summary:false})});if(!response.ok){let err=await response.json().catch(()=>({}));throw new Error(err.detail||'Local inference failed')}const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';while(true){const {value,done}=await reader.read();if(done)break;pending+=decoder.decode(value,{stream:true});let cut;while((cut=pending.indexOf('\n\n'))>=0){const block=pending.slice(0,cut);pending=pending.slice(cut+2);const line=block.split('\n').find(x=>x.startsWith('data: '));if(!line)continue;const event=JSON.parse(line.slice(6));if(event.type==='token'){answer+=event.text;speechBuffer+=event.text;setTranscript(content,answer,'LOCAL MODEL · STREAMING + SPEAKING');queueCompletedSpeech(false)}else if(event.type==='done'){meta=event;queueCompletedSpeech(true)}else if(event.type==='error'){throw new Error(event.message)}}}if(!answer.trim())throw new Error('The local model returned no answer.');latestAnswer=answer;setTranscript(content,answer,'MODEL '+(meta?.model||'LOCAL')+(meta?.used_fallback?' · FALLBACK':'')+' · '+(meta?.memory_notes_used||0)+' MEMORY NOTES');document.getElementById('modelCaption').textContent='LOCAL AI · '+(meta?.model||'local model');document.getElementById('onlineState').textContent='ONLINE';document.getElementById('voiceState').textContent='Speaking response locally as it arrives.';logActivity('Streamed local answer using '+(meta?.model||'local model'));if(meta?.used_fallback)logActivity('Smaller fallback model used.')}catch(e){queueCompletedSpeech(true);setTranscript(content,answer||e.message,answer?'STREAM INTERRUPTED':'REQUEST FAILED');document.getElementById('onlineState').textContent='CHECK SYSTEM';logActivity('Error: '+e.message)}finally{aiBusy=false;document.getElementById('aiVal').textContent='IDLE';document.getElementById('aiBar').style.width='12%';document.getElementById('sendButton').disabled=false}}
 document.getElementById('command').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendCommand()}});
 function tickClock(){let d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString('en-GB',{hour12:false});document.getElementById('dateLine').textContent=d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}).toUpperCase()}
 async function loadStatus(){try{let s=await api('/api/status');document.getElementById('onlineState').textContent='ONLINE';document.getElementById('serviceLine').textContent=s.language_model;document.getElementById('modelCaption').textContent='LOCAL AI · '+s.language_model;cameraEnabled=Boolean(s.dashboard_camera_enabled);microphoneEnabled=Boolean(s.dashboard_microphone_enabled);document.getElementById('cameraControlState').textContent=cameraEnabled?'enabled':'disabled';document.getElementById('microphoneControlState').textContent=microphoneEnabled?'enabled':'disabled';document.getElementById('microphoneControlButton').textContent=microphoneEnabled?'Disable device microphone':'Enable device microphone';document.getElementById('cameraControlButton').textContent=cameraEnabled?'Disable camera control':'Enable camera control';document.getElementById('indicatorState').textContent=s.privacy_indicator;let good=String(s.camera).includes('capture allowed')&&s.privacy_indicator==='on';document.getElementById('privacyBadge').textContent=good?'CAMERA CAPTURE ACTIVE':'CAMERA OFF / UNVERIFIED';document.getElementById('privacyBadge').style.color=good?'var(--green)':'var(--gold)';document.getElementById('inboxText').innerHTML='NOT CONNECTED<br>Optional Gmail integration not configured.';refreshConnections();logOnce('status','Local services checked. Camera '+(good?'active':'off or unverified')+'.')}catch(e){document.getElementById('onlineState').textContent='LOCAL ONLY';document.getElementById('serviceLine').textContent=e.message;logOnce('status-error','Status check: '+e.message)}}

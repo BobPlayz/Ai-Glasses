@@ -122,3 +122,94 @@ def ask_local(
             except OllamaError:
                 pass
         raise OllamaError(str(primary_error)) from primary_error
+
+
+def stream_local(
+    question: str,
+    memories: list[str] | None = None,
+    history: list[dict[str, str]] | None = None,
+):
+    """Yield local Ollama token events, then model metadata, for live text/TTS."""
+    question = question.strip()
+    if not question:
+        raise OllamaError("Enter a question first.")
+    primary = os.environ.get("GLASSES_MODEL", "qwen2.5:1.5b")
+    fallback = os.environ.get("GLASSES_FALLBACK_MODEL", "qwen2.5:0.5b")
+    timeout = float(os.environ.get("GLASSES_MODEL_TIMEOUT", "45"))
+    memory_lines = "\n".join(f"- {item[:300]}" for item in (memories or [])[:8])
+    system = (
+        "You are a capable, calm, JARVIS-inspired assistant running privately on smart glasses. "
+        "Sound natural and conversational, not like a helpdesk or a long essay. "
+        "Answer directly first; usually use 1-4 short sentences unless the user asks for detail. "
+        "Use the language the user speaks, including natural everyday Andhra Telugu for Telugu input. "
+        "Understand follow-up questions using the recent conversation context. "
+        "Do not repeat greetings, narrate your reasoning, or over-explain simple answers. "
+        "Never claim to see an image unless image content is explicitly provided. "
+        "Never claim an action, device state, or live fact that has not been verified. "
+        "These are relevant user-approved local memory notes:\n"
+        + (memory_lines or "(no relevant saved notes)")
+    )
+    messages = [
+        {"role":"system","content":system},
+        *[
+            {"role":item["role"],"content":item["content"][:1200]}
+            for item in (history or [])[-8:]
+            if item.get("role") in {"user","assistant"} and item.get("content")
+        ],
+        {"role":"user","content":question},
+    ]
+    primary_started = False
+
+    def stream_model(model: str):
+        nonlocal primary_started
+        request = urllib.request.Request(
+            _ollama_url("/api/chat"),
+            data=json.dumps({
+                "model":model,"stream":True,"keep_alive":"10m",
+                "messages":messages,
+                "options":{"temperature":0.45,"num_ctx":3072,"num_predict":180},
+            }).encode("utf-8"),
+            headers={"Content-Type":"application/json"},
+            method="POST",
+        )
+        emitted = False
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                for raw_line in response:
+                    if not raw_line.strip():
+                        continue
+                    try:
+                        item=json.loads(raw_line.decode("utf-8"))
+                    except (UnicodeDecodeError,json.JSONDecodeError):
+                        continue
+                    token=item.get("message",{}).get("content","")
+                    if token:
+                        emitted=True
+                        if model == primary:
+                            primary_started = True
+                        yield {"type":"token","text":token}
+                    if item.get("done"):
+                        if not emitted:
+                            raise OllamaError("The local model returned an empty answer.")
+                        yield {"type":"meta","model":model,"used_fallback":False}
+                        return
+        except urllib.error.HTTPError as exc:
+            detail=exc.read().decode("utf-8",errors="replace")[:500]
+            raise OllamaError(f"Local model service returned HTTP {exc.code}: {detail}") from exc
+        except (urllib.error.URLError,TimeoutError,OSError) as exc:
+            raise OllamaError("Local Ollama service is unavailable. Start Ollama and download the configured model first.") from exc
+        raise OllamaError("The local model stream ended unexpectedly.")
+
+    try:
+        yield from stream_model(primary)
+    except OllamaError as primary_error:
+        if fallback and fallback != primary and not primary_started:
+            try:
+                for event in stream_model(fallback):
+                    if event.get("type") == "meta":
+                        event["used_fallback"] = True
+                    yield event
+                return
+            except OllamaError:
+                pass
+        raise primary_error
