@@ -9,15 +9,15 @@ This is candidate firmware, not verified firmware. Do not flash until the exact 
 - Polls /api/device/command for dashboard camera permission and an explicit visual-question capture request.
 - Camera driver remains stopped until both dashboard permission and the physical switch allow it.
 - Checks the physical privacy switch before capture and illuminates the external indicator during capture.
-- Uploads one JPEG frame to /api/device/capture-result.
+- Uploads one JPEG frame (firmware-capped at 1 MiB to avoid large duplicate RAM allocations) to /api/device/capture-result.
 - Captures short mono 16 kHz audio chunks from the candidate onboard PDM microphone and sends WAV data to /api/device/audio.
 - The laptop performs wake-phrase detection, speech recognition, and local model inference. Speech output uses online neural TTS by default unless the dashboard toggle is disabled, then falls back to cached offline speech when available.
 
 ## Wiring assumptions to verify before power-up
 - Privacy switch: GPIO 2 to GND means camera capture enabled, using internal pull-up.
 - Indicator LED: GPIO 21 through a suitable current-limiting resistor to GND.
-- Camera pin map is the candidate XIAO ESP32-S3 Sense mapping in src/main.cpp.
-- PDM microphone pins are assumed to be GPIO 41 (clock) and GPIO 42 (data). Verify against the exact hardware revision.
+- Camera pin map is the candidate XIAO ESP32-S3 Sense mapping in src/main.cpp. The firmware limits frames to 1 MiB because it temporarily builds a multipart upload buffer alongside the camera frame.
+- PDM microphone pins: GPIO 42 is clock and GPIO 41 is data. This matches the [official Seeed pin map](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/); still verify the exact hardware revision.
 - The camera switch gates firmware capture, not electrical power to the sensor. For a stronger physical guarantee, a technician must review a hardware power-gating design.
 
 ## Setup

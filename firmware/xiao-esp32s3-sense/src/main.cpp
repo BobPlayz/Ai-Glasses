@@ -18,7 +18,7 @@ static constexpr int PRIVACY_SWITCH_PIN = 2; // switch to GND = capture enabled
 static constexpr int CAMERA_INDICATOR_PIN = 21; // external LED + resistor
 static constexpr unsigned long STATUS_INTERVAL_MS = 2000;
 static constexpr unsigned long COMMAND_INTERVAL_MS = 300;
-static constexpr size_t MAX_JPEG_BYTES = 8 * 1024 * 1024;
+static constexpr size_t MAX_JPEG_BYTES = 1 * 1024 * 1024;
 static constexpr uint32_t MIC_SAMPLE_RATE = 16000;
 static constexpr size_t MIC_SAMPLES = 32000; // two seconds, mono, 16-bit PCM
 static constexpr int SPEAKER_BCLK_PIN = 4; // XIAO D3

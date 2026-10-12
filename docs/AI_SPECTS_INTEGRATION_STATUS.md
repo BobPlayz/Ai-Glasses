@@ -7,7 +7,7 @@ This document separates what the repository already does from what still needs h
 | Component | Role | Integration note |
 |---|---|---|
 | Virtual Pathshala XIAO ESP32-S3 Sense | camera + onboard PDM microphone + controller | firmware target; verify exact revision and camera/mic pinout before flashing |
-| Roboduino MAX98357 I2S amplifier | digital audio amplifier | requires I2S BCLK, LRCLK, and DATA from the ESP32; speaker output is not implemented in current firmware |
+| Roboduino MAX98357 I2S amplifier | digital audio amplifier | candidate firmware implements I2S BCLK/LRCLK/DATA output on GPIO 4/5/6; physical wiring and playback remain unverified |
 | Electronic Spices 2-inch woofer speaker | response audio | confirm speaker impedance/power rating matches the amplifier module |
 | Electronic Spices 5 V mobile power bank module | portable supply | use only its documented protected output; do not improvise battery/charging wiring |
 | Ambrane USB-C data cable | setup/programming | confirm it is a data cable, not charge-only |
@@ -25,18 +25,17 @@ This document separates what the repository already does from what still needs h
 - The laptop app already supports local Ollama text inference, local image description, English/Telugu OCR, online neural speech by default with offline fallback, a browser dashboard, device pairing, and privacy-gated XIAO JPEG snapshot uploads.
 - The XIAO firmware currently uploads short WAV microphone chunks only when dashboard microphone permission is enabled.
 - Visual questions request a single JPEG snapshot through the device command queue. The current XIAO firmware is **not** a continuous video streamer.
-- Speech responses currently play through the laptop's audio output. The MAX98357 + woofer are **not yet wired into the response path**.
+- Speech responses play through the laptop's audio output, and the software/firmware now include a bounded paired-device WAV queue and candidate I2S playback path for the MAX98357 + woofer. Actual glasses-speaker playback is **not yet physically verified**.
 - Added `laptop/vision/live_stream.py` supplies a bounded, private-LAN MJPEG reader and throttled local vision inference for a source that actually exposes an MJPEG stream. It accepts still images through `describe_image`. The helper is not yet wired into the dashboard and is not an MJPEG server for the XIAO.
 
 ## Required next implementation steps
 
-1. Keep snapshot mode as the known-safe baseline. Add a dashboard live-analysis toggle that requests frames repeatedly through the existing privacy-gated device queue, throttles inference (start at one frame every 2 seconds), and stops immediately when either privacy control is disabled.
-2. Add a speaker-response queue: local TTS must render a bounded PCM/WAV response, the authenticated device endpoint must deliver it only to the paired board, and firmware must play it over a second I2S interface for the MAX98357. Keep laptop-speaker playback as a fallback.
-3. Choose and document non-conflicting I2S output pins only after checking the exact XIAO revision and the camera/microphone wiring. The current microphone uses the existing I2S peripheral configuration; output should use a separate peripheral where supported.
-4. Enforce limits on audio response size and duration; never accept arbitrary URLs, unauthenticated audio, or public-network stream sources.
-5. Add unit tests for camera-stop behavior, speaker queue authorization, audio size/duration limits, and permission revocation during capture/playback.
-6. Bench-test over USB first, with a multimeter and an experienced adult checking supply polarity, speaker impedance, solder joints, and shorts. Do not attach the power module to the wearable until the power path is verified.
-7. Run setup, Python tests, firmware compile, then test on the exact physical board. Finally cache models/voices and rehearse with internet disconnected.
+1. Diagnose the outstanding phone-image-to-local-vision path using the existing application-level tests and safe per-attempt diagnostics. The previous direct model test succeeded, but the dashboard phone-camera route has not yet passed its end-to-end acceptance test.
+2. Run the paired-device audio path on the exact board: verify bounded WAV retrieval, I2S pin mapping, amplifier input labels, speaker impedance/power, and that laptop playback remains available when device audio fails.
+3. Verify the camera switch and visible indicator on the exact board revision. The firmware switch is a software gate, not an electrical camera power disconnect.
+4. Complete a full laptop rehearsal with internet disconnected after caching all required models and voices. Record observed latency and whether English/Telugu speech and vision succeed.
+5. Bench-test over USB first, with an experienced adult/technician checking polarity, speaker load, solder joints, and shorts. Do not connect a wearable battery/power module until the power path is verified.
+6. Keep CI checks green and add regressions for every new failure discovered during real-device tests. A compile or unit-test pass does not certify physical behavior.
 
 ## Completion gate
 

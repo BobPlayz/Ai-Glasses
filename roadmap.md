@@ -11,7 +11,7 @@ The software foundation, local AI adapters, dashboard, privacy controls, candida
 
 On 12 October, the voice path received a reliability pass: online neural TTS is the fresh-install default with an explicit saved offline switch, Gen Z style prompting was rewritten to discourage forced slang, prompt newline formatting was fixed, and an undefined speech-queue timestamp reference was removed. Expired device audio is now pruned, speech warm-up failure no longer blocks text chat, and automated tests cover style prompt formatting, voice preference persistence, and queue expiry. GitHub Actions unit tests passed for the voice/queue changes at commit `6db1d42`; hardware and target-laptop behavior remain unverified.
 
-The next priority is to rehearse the updated software on the actual laptop, then finish diagnosis of the phone-image-to-local-vision path before attempting physical glasses integration.
+The next priority is to diagnose the phone-image-to-local-vision path and rehearse the paired audio flow on the actual laptop/board. Recent hardening adds fresh privacy-state checks for camera uploads, JPEG signature and request-expiry validation, redirect blocking for private-LAN camera fetches, a 1 MiB firmware frame cap, and removal of generated PlatformIO build output from Git.
 
 ---
 
@@ -355,3 +355,17 @@ Improve the app's retry handling before further manual testing:
 4. A deliberately simulated Ollama failure returns an actionable error rather than a generic empty-description message.
 5. The test suite and current CI pass after the fix.
 
+
+
+## Latest reliability hardening: 12 October 2026
+
+The following changes are committed to `main`; they are software changes, not physical-device certification:
+
+- Camera upload acceptance now requires an active, unexpired capture request, dashboard camera permission, a connected device, recent device status, camera-enabled status, physical-switch confirmation, and an active indicator signal.
+- The server rejects non-JPEG glasses frames and rechecks privacy signals after the upload completes.
+- Firmware checks the physical switch again immediately before transmitting a frame and caps a single JPEG at 1 MiB to reduce peak memory pressure from its multipart copy.
+- Phone-camera and optional MJPEG fetches no longer follow HTTP redirects, preventing a private camera URL from redirecting the laptop to another host. This is covered by a local redirect regression test.
+- Corrected the firmware README's microphone pin labels: GPIO42 is PDM clock and GPIO41 is PDM data, matching [Seeed's official pin map](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/).
+- Removed generated `.pio` build products from the repository and ignored future PlatformIO build output.
+
+**Still unverified:** the phone-camera image-to-model path, exact board revision and pin compatibility, physical indicator visibility, real microphone quality, MAX98357/speaker playback, and the full offline exhibition rehearsal.
