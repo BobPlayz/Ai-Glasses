@@ -2,14 +2,16 @@
 
 **Project:** BobPlayz/Ai-Glasses  
 **Purpose:** A local-first smart-glasses prototype hosted by a Windows laptop, with an Android phone available as a temporary camera input.  
-**Status date:** 11 October 2026  
+**Status date:** 12 October 2026  
 **Roadmap rule:** Distinguish code that exists from functionality verified on the actual laptop or hardware. A successful commit or CI run is not proof of a complete physical demo.
 
 ## Executive status
 
-The software foundation, local AI adapters, dashboard, privacy controls, candidate ESP32-S3 firmware, setup scripts, and CI checks are in the repository. This conversation also confirmed that Ollama is reachable and that `moondream:1.8b` can return a result for a real test image sent directly to its API. The Android phone camera integration has been implemented, but its end-to-end flow through the Ai-Glasses dashboard is **not yet verified**: earlier attempts returned HTTP 503, and a later attempt reported that the local vision model returned no description.
+The software foundation, local AI adapters, dashboard, privacy controls, candidate ESP32-S3 firmware, setup scripts, and CI checks are in the repository. Previous hands-on work confirmed that Ollama is reachable and that `moondream:1.8b` can return a result for a test image sent directly to its API. The Android phone camera integration has been implemented, but its end-to-end flow through the dashboard is **not yet verified**: earlier attempts returned HTTP 503, and a later attempt reported that the local vision model returned no description.
 
-The immediate priority is to finish diagnosis and make the phone-image-to-local-vision path reliable before adding more features or attempting hardware integration.
+On 12 October, the voice path received a reliability pass: online neural TTS is the fresh-install default with an explicit saved offline switch, Gen Z style prompting was rewritten to discourage forced slang, prompt newline formatting was fixed, and an undefined speech-queue timestamp reference was removed. Expired device audio is now pruned, speech warm-up failure no longer blocks text chat, and automated tests cover style prompt formatting, voice preference persistence, and queue expiry. GitHub Actions unit tests passed for the voice/queue changes at commit `6db1d42`; hardware and target-laptop behavior remain unverified.
+
+The next priority is to rehearse the updated software on the actual laptop, then finish diagnosis of the phone-image-to-local-vision path before attempting physical glasses integration.
 
 ---
 
@@ -70,7 +72,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ## Phase 3: Local language AI, memory, speech, and OCR
 
-**Goal:** Provide useful offline interactions without sending user data to a cloud AI service.
+**Goal:** Keep language-model inference, memory, transcription, and vision local; offer online neural speech as a separately switchable quality option.
 
 ### Accomplished
 - Integrated local Ollama text models:
@@ -79,13 +81,17 @@ Set-ExecutionPolicy -Scope Process Bypass
 - Added local SQLite useful-fact memory and opt-in conversation summaries.
 - Added an offline multilingual Whisper transcription adapter with a cached model.
 - Added cached Piper neural speech voices for British English and Telugu, with a Windows speech fallback for English.
+- Added Microsoft Edge neural online TTS (US English and Indian Telugu) as the default on a fresh setup, with a persistent dashboard toggle and offline fallback.
+- Added a separate Gen Z wording toggle; the style prompt now emphasizes conversational rhythm and context rather than mechanically inserting slang.
+- Online TTS sends the text being spoken to the online speech service. Local language-model inference and local vision remain on the laptop.
 - Added local Tesseract OCR for English and Telugu when the required language data is available.
 - Added a local vision adapter that combines an image question with optional OCR output.
 - Documented that local answers should not download models during a question.
 
 ### Next actions
-- Smoke-test text, memory save/read/clear, English speech, Telugu speech, and transcription separately.
-- Verify that all model and voice assets are cached before the offline rehearsal.
+- Smoke-test text, memory save/read/clear, online English/Telugu speech, offline English/Telugu fallback, and transcription separately.
+- Verify that all model and voice assets are cached before the offline rehearsal; online speech being enabled by default does not make the whole system internet-independent.
+- Test the paired-device speech queue with real firmware and confirm that speech still arrives when several short answer chunks are queued.
 - Record observed latency and quality on the actual laptop rather than relying on model specifications.
 
 **Exit criteria:** Each local AI capability works independently with cached assets, and its failures are reported clearly.
