@@ -46,7 +46,7 @@ For an existing setup, install and verify the offline male English and Telugu vo
 
 ### Speech voices
 
-In Settings → Voice & wake phrase, enable **Natural online voice** for neural speech through `edge-tts`. It uses a natural US English neural voice and an Indian Telugu neural voice, and requires internet access. Text sent for speech is processed by the online speech service. This community integration is not an official Microsoft Speech SDK integration and may occasionally stop working if the upstream service changes.
+On first run, **Natural online voice** is enabled by default in Settings → Voice & wake phrase. It uses neural speech through `edge-tts`, with a natural US English voice and an Indian Telugu voice, and requires internet access. You can switch it off at any time. Text sent for speech is processed by the online speech service. This community integration is not an official Microsoft Speech SDK integration and may occasionally stop working if the upstream service changes.
 
 Turn it off to use cached Piper neural voices locally: Alan for British English and Venkatesh for Telugu. Offline speech needs no API key or cloud service. The separate **Gen Z style** toggle controls wording, not the audio voice. Online speech is used for browser playback and paired-device audio; if online synthesis fails, the existing offline voice remains available.
 
