@@ -66,6 +66,7 @@ def ask_local(
     question: str,
     memories: list[str] | None = None,
     history: list[dict[str, str]] | None = None,
+    web_context: str | None = None,
 ) -> ModelReply:
     question = question.strip()
     if not question:
@@ -87,6 +88,8 @@ def ask_local(
         "These are relevant user-approved local memory notes:\n"
         + (memory_lines or "(no relevant saved notes)")
     )
+    if web_context:
+        system += "\n\n" + web_context[:6000]
 
     def run(model: str) -> str:
         data = _post_json(
@@ -128,6 +131,7 @@ def stream_local(
     question: str,
     memories: list[str] | None = None,
     history: list[dict[str, str]] | None = None,
+    web_context: str | None = None,
 ):
     """Yield local Ollama token events, then model metadata, for live text/TTS."""
     question = question.strip()
@@ -149,6 +153,8 @@ def stream_local(
         "These are relevant user-approved local memory notes:\n"
         + (memory_lines or "(no relevant saved notes)")
     )
+    if web_context:
+        system += "\n\n" + web_context[:6000]
     messages = [
         {"role":"system","content":system},
         *[
