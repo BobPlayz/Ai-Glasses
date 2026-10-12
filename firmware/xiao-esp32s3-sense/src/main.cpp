@@ -233,6 +233,13 @@ bool uploadFrame(const String& requestId, camera_fb_t* frame) {
   memcpy(body + head.length(), frame->buf, frame->len);
   memcpy(body + head.length() + frame->len, tail.c_str(), tail.length());
   http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+  // The switch can change while the JPEG is being prepared. Check again at
+  // the final point before the frame leaves the board.
+  if (!privacySwitchEnabled() || !indicatorOn) {
+    free(body);
+    http.end();
+    return false;
+  }
   int code = http.sendRequest("POST", body, total);
   free(body);
   http.end();
