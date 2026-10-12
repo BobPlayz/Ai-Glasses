@@ -5,8 +5,6 @@ New-Item -ItemType Directory -Force -Path $ttsDir | Out-Null
 $voiceFiles = @(
     @{ Name = "en_GB-alan-medium.onnx"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx?download=true" },
     @{ Name = "en_GB-alan-medium.onnx.json"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx.json?download=true" },
-    @{ Name = "en_US-ryan-medium.onnx"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx?download=true" },
-    @{ Name = "en_US-ryan-medium.onnx.json"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx.json?download=true" },
     @{ Name = "te_IN-venkatesh-medium.onnx"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/te/te_IN/venkatesh/medium/te_IN-venkatesh-medium.onnx?download=true" },
     @{ Name = "te_IN-venkatesh-medium.onnx.json"; Url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/te/te_IN/venkatesh/medium/te_IN-venkatesh-medium.onnx.json?download=true" }
 )
