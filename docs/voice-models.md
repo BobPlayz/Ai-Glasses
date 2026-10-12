@@ -1,11 +1,18 @@
-# Offline voice assets
+# Voice assets and defaults
 
-Setup caches two Piper neural voices locally:
-- English: en_US-lessac-medium
-- Telugu (India): te_IN-maya-medium
+## Online neural speech
+A fresh setup defaults to online neural TTS:
+- English: `en-US-AvaNeural`
+- Telugu: `te-IN-ShrutiNeural`
 
-Voice files are downloaded from the Piper voice catalogue and are not committed to this repository. The Telugu model card identifies the voice as Telugu (India), medium quality, trained from the IIT Madras IndicTTS dataset. Review the model card and its dataset license if redistributing the model or presenting the project outside the school exhibition.
+This mode requires internet and sends the text being spoken to the online speech provider. It is controlled independently from Gen Z wording in Settings → Voice & wake phrase.
 
-At runtime, the assistant selects the Telugu voice when the response contains Telugu-script characters and the English voice otherwise. If Piper fails, Windows SAPI is tried, then eSpeak NG if installed. If all speech engines fail, the answer remains visible as text.
+## Offline fallback
+The project setup expects cached Piper assets:
+- English: `en_GB-alan-medium`
+- Telugu (India): `te_IN-venkatesh-medium`
 
-Models are loaded locally from models/tts. No cloud speech service is used.
+Voice files are downloaded during setup and are not committed to this repository. If online synthesis fails, the code attempts local Piper speech; English may fall back to an installed Windows speech voice. Verify both language paths before the exhibition.
+
+## Offline rehearsal
+Disable Natural online voice in Settings, test English and Telugu output, then disconnect the internet and repeat the demo. Do not describe the whole speech path as offline while the online voice toggle is enabled.
