@@ -177,7 +177,7 @@ def _speak_with_windows(text: str) -> dict | None:
 
 
 def speak_local(text: str) -> dict:
-    """Use offline Piper neural English/Telugu voices; never calls a cloud TTS API."""
+    """Prefer online neural speech when enabled, then fall back to local speech."""
     text = text.strip()
     if not text:
         return {"spoken": False, "reason": "empty_text"}
@@ -226,10 +226,10 @@ def speak_local(text: str) -> dict:
 
 
 def synthesize_wav_local(text: str, max_chars: int = 220) -> bytes | None:
-    """Render tuned offline Piper speech as mono PCM WAV bytes for paired glasses.
+    """Render mono PCM WAV for browser/device output, preferring online TTS when enabled.
 
-    Returns None when Piper assets are unavailable, allowing laptop-output fallback.
-    This function never calls a cloud service and does not play audio itself.
+    Online mode sends the text being spoken to the speech provider. If it fails,
+    cached local Piper assets are used. This function does not play audio itself.
     """
     text = " ".join(text.strip().split())[:max(1, min(max_chars, 500))]
     if not text:
