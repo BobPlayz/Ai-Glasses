@@ -23,3 +23,6 @@ firmware/**/secrets.h
 models/tesseract/
 models/tts/
 models/whisper/
+# PlatformIO build output (generated locally, never commit)
+.pio/
+firmware/**/.pio/
