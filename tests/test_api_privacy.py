@@ -24,6 +24,7 @@ class DevicePrivacyApiTests(unittest.TestCase):
         self.old_voice_armed = glasses_app._voice_armed
         self.old_voice_parts = glasses_app._voice_question_parts
         self.old_capture_request = glasses_app._capture_request
+        self.old_last_frame = glasses_app._last_frame
         self.addCleanup(self.restore_state)
 
         glasses_app.DEVICE_TOKEN_PATH = root / ".device-token"
@@ -37,6 +38,7 @@ class DevicePrivacyApiTests(unittest.TestCase):
         glasses_app._voice_armed = False
         glasses_app._voice_question_parts = []
         glasses_app._capture_request = None
+        glasses_app._last_frame = None
         self.client = TestClient(glasses_app.app)
         self.headers = {"X-Device-Token": "test-device-token"}
 
@@ -50,6 +52,7 @@ class DevicePrivacyApiTests(unittest.TestCase):
         glasses_app._voice_armed = self.old_voice_armed
         glasses_app._voice_question_parts = self.old_voice_parts
         glasses_app._capture_request = self.old_capture_request
+        glasses_app._last_frame = self.old_last_frame
         if self.old_lan_mode is None:
             os.environ.pop("GLASSES_LAN_MODE", None)
         else:
@@ -133,6 +136,63 @@ class DevicePrivacyApiTests(unittest.TestCase):
         self.assertTrue(enabled.json()["dashboard_camera_enabled"])
         disabled = self.client.post("/api/camera/control", json={"enabled": False})
         self.assertFalse(disabled.json()["dashboard_camera_enabled"])
+
+
+    def _prepare_capture_upload(self, *, status_age=0, camera_enabled=True, privacy=True, indicator=True):
+        glasses_app._dashboard_camera_enabled = True
+        glasses_app._capture_request = {
+            "id": "capture-test",
+            "question": "What is this?",
+            "expires_at": glasses_app.time.time() + 10,
+        }
+        glasses_app._last_device_status = {
+            "connected": True,
+            "camera_enabled": camera_enabled,
+            "privacy_switch_enabled": privacy,
+            "indicator_on": indicator,
+            "updated_at": glasses_app.time.time() - status_age,
+        }
+
+    def test_camera_upload_requires_fresh_status_and_all_privacy_signals(self):
+        self._prepare_capture_upload(status_age=13)
+        response = self.client.post(
+            "/api/device/capture-result?request_id=capture-test",
+            headers=self.headers,
+            files={"file": ("frame.jpg", b"\\xff\\xd8\\xff\\xd9", "image/jpeg")},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Fresh device status", response.json()["detail"])
+
+    def test_camera_upload_rejects_frame_without_jpeg_signature(self):
+        self._prepare_capture_upload()
+        response = self.client.post(
+            "/api/device/capture-result?request_id=capture-test",
+            headers=self.headers,
+            files={"file": ("frame.jpg", b"not a jpeg", "image/jpeg")},
+        )
+        self.assertEqual(response.status_code, 415)
+
+    def test_camera_upload_requires_dashboard_permission(self):
+        self._prepare_capture_upload()
+        glasses_app._dashboard_camera_enabled = False
+        response = self.client.post(
+            "/api/device/capture-result?request_id=capture-test",
+            headers=self.headers,
+            files={"file": ("frame.jpg", b"\\xff\\xd8\\xff\\xd9", "image/jpeg")},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Dashboard camera permission", response.json()["detail"])
+
+    def test_valid_camera_upload_requires_and_accepts_all_privacy_signals(self):
+        self._prepare_capture_upload()
+        response = self.client.post(
+            "/api/device/capture-result?request_id=capture-test",
+            headers=self.headers,
+            files={"file": ("frame.jpg", b"\\xff\\xd8\\xff\\xd9", "image/jpeg")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["accepted"])
+        self.assertEqual(glasses_app._last_frame["request_id"], "capture-test")
 
 
 if __name__ == "__main__":
