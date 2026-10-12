@@ -17,9 +17,34 @@ _voice_cache: dict[str, object] = {}
 _voice_lock = threading.Lock()
 _synthesis_lock = threading.Lock()
 
+# Faster phoneme timing plus a small playback-rate lift gives JARVIS a
+# brisker, slightly brighter sound without changing the installed voice model.
+PIPER_LENGTH_SCALE = 0.88
+PLAYBACK_RATE_MULTIPLIER = 1.05
+
 
 def _is_telugu(text: str) -> bool:
     return any(0x0C00 <= ord(char) <= 0x0C7F for char in text)
+
+
+def _tune_wav_bytes(audio: bytes) -> bytes:
+    """Raise playback pitch slightly by adjusting WAV sample-rate metadata.
+
+    This intentionally also makes playback a little faster. Audio samples are
+    unchanged, and the WAV header stays valid for laptop and paired-device use.
+    """
+    source = io.BytesIO(audio)
+    tuned = io.BytesIO()
+    with wave.open(source, "rb") as reader:
+        params = reader.getparams()
+        frames = reader.readframes(reader.getnframes())
+        with wave.open(tuned, "wb") as writer:
+            writer.setnchannels(params.nchannels)
+            writer.setsampwidth(params.sampwidth)
+            writer.setframerate(max(1, round(params.framerate * PLAYBACK_RATE_MULTIPLIER)))
+            writer.setcomptype(params.comptype, params.compname)
+            writer.writeframes(frames)
+    return tuned.getvalue()
 
 
 def _speak_with_piper(text: str, voice_key: str) -> dict | None:
@@ -30,7 +55,7 @@ def _speak_with_piper(text: str, voice_key: str) -> dict | None:
 
     try:
         import winsound
-        from piper import PiperVoice
+        from piper import PiperVoice, SynthesisConfig
 
         with _voice_lock:
             voice = _voice_cache.get(voice_key)
@@ -43,7 +68,12 @@ def _speak_with_piper(text: str, voice_key: str) -> dict | None:
         try:
             with _synthesis_lock:
                 with wave.open(str(output_path), "wb") as wav_file:
-                    voice.synthesize_wav(text[:1200], wav_file)
+                    voice.synthesize_wav(
+                        text[:1200],
+                        wav_file,
+                        syn_config=SynthesisConfig(length_scale=PIPER_LENGTH_SCALE),
+                    )
+                output_path.write_bytes(_tune_wav_bytes(output_path.read_bytes()))
                 winsound.PlaySound(str(output_path), winsound.SND_FILENAME)
         finally:
             output_path.unlink(missing_ok=True)
@@ -78,7 +108,7 @@ def _speak_with_windows(text: str) -> dict | None:
                     break
             if chosen is not None:
                 engine.setProperty("voice", chosen.id)
-            engine.setProperty("rate", 175)
+            engine.setProperty("rate", 195)
             engine.say(text[:1200])
             engine.runAndWait()
             engine.stop()
@@ -126,7 +156,7 @@ def speak_local(text: str) -> dict:
 
 
 def synthesize_wav_local(text: str, max_chars: int = 220) -> bytes | None:
-    """Render bounded offline Piper speech to mono PCM WAV bytes for the paired glasses.
+    """Render tuned offline Piper speech as mono PCM WAV bytes for paired glasses.
 
     Returns None when Piper assets are unavailable, allowing laptop-output fallback.
     This function never calls a cloud service and does not play audio itself.
@@ -140,7 +170,7 @@ def synthesize_wav_local(text: str, max_chars: int = 220) -> bytes | None:
     if not model_path.is_file() or not config_path.is_file():
         return None
     try:
-        from piper import PiperVoice
+        from piper import PiperVoice, SynthesisConfig
         with _voice_lock:
             voice = _voice_cache.get(voice_key)
             if voice is None:
@@ -149,8 +179,12 @@ def synthesize_wav_local(text: str, max_chars: int = 220) -> bytes | None:
         output = io.BytesIO()
         with _synthesis_lock:
             with wave.open(output, "wb") as wav_file:
-                voice.synthesize_wav(text, wav_file)
-        audio = output.getvalue()
+                voice.synthesize_wav(
+                    text,
+                    wav_file,
+                    syn_config=SynthesisConfig(length_scale=PIPER_LENGTH_SCALE),
+                )
+        audio = _tune_wav_bytes(output.getvalue())
         if not audio.startswith(b"RIFF") or audio[8:12] != b"WAVE" or len(audio) > 900_000:
             return None
         return audio
