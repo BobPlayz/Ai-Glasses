@@ -9,12 +9,12 @@ class DeviceSpeechTests(unittest.TestCase):
         self.assertIsNone(synthesize_wav_local("   "))
 
     def test_missing_voice_assets_fall_back_cleanly(self):
-        with patch("laptop.speech.speak.VOICE_DIR") as voice_dir:
+        with patch("laptop.speech.speak.online_voice_enabled", return_value=False), patch("laptop.speech.speak.VOICE_DIR") as voice_dir:
             voice_dir.__truediv__.return_value.is_file.return_value = False
             self.assertIsNone(synthesize_wav_local("Hello there"))
 
     def test_long_text_is_bounded_before_synthesis(self):
-        with patch("laptop.speech.speak.VOICE_DIR") as voice_dir:
+        with patch("laptop.speech.speak.online_voice_enabled", return_value=False), patch("laptop.speech.speak.VOICE_DIR") as voice_dir:
             voice_dir.__truediv__.return_value.is_file.return_value = False
             self.assertIsNone(synthesize_wav_local("hello " * 2000))
 
