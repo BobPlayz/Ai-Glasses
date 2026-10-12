@@ -158,7 +158,7 @@ class DevicePrivacyApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/device/capture-result?request_id=capture-test",
             headers=self.headers,
-            files={"file": ("frame.jpg", b"\\xff\\xd8\\xff\\xd9", "image/jpeg")},
+            files={"file": ("frame.jpg", bytes.fromhex("ffd8ffd9"), "image/jpeg")},
         )
         self.assertEqual(response.status_code, 403)
         self.assertIn("Fresh device status", response.json()["detail"])
@@ -178,7 +178,7 @@ class DevicePrivacyApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/device/capture-result?request_id=capture-test",
             headers=self.headers,
-            files={"file": ("frame.jpg", b"\\xff\\xd8\\xff\\xd9", "image/jpeg")},
+            files={"file": ("frame.jpg", bytes.fromhex("ffd8ffd9"), "image/jpeg")},
         )
         self.assertEqual(response.status_code, 403)
         self.assertIn("Dashboard camera permission", response.json()["detail"])
@@ -188,7 +188,7 @@ class DevicePrivacyApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/device/capture-result?request_id=capture-test",
             headers=self.headers,
-            files={"file": ("frame.jpg", b"\\xff\\xd8\\xff\\xd9", "image/jpeg")},
+            files={"file": ("frame.jpg", bytes.fromhex("ffd8ffd9"), "image/jpeg")},
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["accepted"])

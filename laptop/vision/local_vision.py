@@ -49,6 +49,79 @@ def extract_text_local(image_bytes: bytes) -> str:
         return ""
 
 
+def _request_vision_answer(
+    host: str,
+    model: str,
+    image_b64: str,
+    prompt: str,
+    *,
+    attempt: int,
+    image_bytes_count: int,
+) -> str:
+    """Make one local Ollama request and log safe diagnostics, never image data."""
+    import logging
+    import time
+
+    logger = logging.getLogger(__name__)
+    payload = {
+        "model": model,
+        "stream": False,
+        "keep_alive": "5m",
+        "messages": [{
+            "role": "user",
+            "content": prompt,
+            "images": [image_b64],
+        }],
+        "options": {"temperature": 0.1, "num_ctx": 2048},
+    }
+    request = urllib.request.Request(
+        host + "/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    started = time.monotonic()
+    status_code = 200
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            status_code = getattr(response, "status", 200)
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:400]
+        logger.warning(
+            "Vision request failed attempt=%s model=%s image_bytes=%s status=%s elapsed_ms=%s error=HTTPError",
+            attempt, model, image_bytes_count, exc.code,
+            int((time.monotonic() - started) * 1000),
+        )
+        raise VisionError(f"Local vision attempt {attempt} failed with HTTP {exc.code}: {detail}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        logger.warning(
+            "Vision request failed attempt=%s model=%s image_bytes=%s status=%s elapsed_ms=%s error=%s",
+            attempt, model, image_bytes_count, status_code,
+            int((time.monotonic() - started) * 1000), type(exc).__name__,
+        )
+        raise VisionError(
+            f"Local vision attempt {attempt} failed ({type(exc).__name__}: {exc}). "
+            "Check that Ollama is running and try again."
+        ) from exc
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "Vision request failed attempt=%s model=%s image_bytes=%s status=%s elapsed_ms=%s error=JSONDecodeError",
+            attempt, model, image_bytes_count, status_code,
+            int((time.monotonic() - started) * 1000),
+        )
+        raise VisionError(f"Local vision attempt {attempt} returned invalid JSON.") from exc
+
+    message = result.get("message", {}) if isinstance(result, dict) else {}
+    answer = message.get("content", "").strip() if isinstance(message, dict) else ""
+    logger.info(
+        "Vision request attempt=%s model=%s image_bytes=%s status=%s elapsed_ms=%s content_nonempty=%s",
+        attempt, model, image_bytes_count, status_code,
+        int((time.monotonic() - started) * 1000), bool(answer),
+    )
+    return answer
+
+
 def ask_image_local(image_bytes: bytes, question: str) -> dict:
     """Ask a local Ollama vision model about one explicitly captured image.
 
@@ -84,64 +157,20 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
     if parsed.username or parsed.password:
         raise VisionError("OLLAMA_HOST must not contain credentials.")
     model = os.environ.get("GLASSES_VISION_MODEL", "moondream:1.8b")
-    # Keep the vision prompt short. Moondream can return an empty message when
-    # a long OCR transcript is appended to the image question; OCR is returned
-    # separately to the caller instead of being fed back into vision inference.
-    prompt = question
-    payload = {
-        "model": model,
-        "stream": False,
-        "keep_alive": "5m",
-        "messages": [{
-            "role": "user",
-            "content": prompt,
-            "images": [base64.b64encode(vision_image_bytes).decode("ascii")],
-        }],
-        "options": {"temperature": 0.1, "num_ctx": 2048},
-    }
-    request = urllib.request.Request(
-        host + "/api/chat",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    image_b64 = base64.b64encode(vision_image_bytes).decode("ascii")
+
+    answer = _request_vision_answer(
+        host, model, image_b64, question,
+        attempt=1, image_bytes_count=len(vision_image_bytes),
     )
-    try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:400]
-        raise VisionError(f"Local vision model error HTTP {exc.code}: {detail}") from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise VisionError(f"Could not complete local vision request ({type(exc).__name__}: {exc}). Check that Ollama is running and try again.") from exc
-    except json.JSONDecodeError as exc:
-        raise VisionError("Local vision service returned invalid JSON.") from exc
-    answer = result.get("message", {}).get("content", "").strip()
     if not answer:
-        # Some small local vision models occasionally return an empty message
-        # for longer prompts. Retry once with a simpler prompt before falling back.
-        retry_payload = {
-            "model": model,
-            "stream": False,
-            "keep_alive": "5m",
-            "messages": [{
-                "role": "user",
-                "content": "Describe this image briefly. Read visible text if possible.",
-                "images": [base64.b64encode(vision_image_bytes).decode("ascii")],
-            }],
-            "options": {"temperature": 0.1, "num_ctx": 2048},
-        }
-        retry_request = urllib.request.Request(
-            host + "/api/chat",
-            data=json.dumps(retry_payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        # Some small local vision models return an empty message for a prompt.
+        # Retry once with a simpler prompt; keep failure details if the retry fails.
+        answer = _request_vision_answer(
+            host, model, image_b64,
+            "Describe this image briefly. Read visible text if possible.",
+            attempt=2, image_bytes_count=len(vision_image_bytes),
         )
-        try:
-            with urllib.request.urlopen(retry_request, timeout=180) as response:
-                retry_result = json.loads(response.read().decode("utf-8"))
-            answer = retry_result.get("message", {}).get("content", "").strip()
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
-            answer = ""
     if not answer and ocr_text:
         answer = "I couldn't describe the image reliably. Offline OCR found this text: " + ocr_text
         return {
@@ -152,5 +181,8 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
             "vision_fallback": True,
         }
     if not answer:
-        raise VisionError("The local vision model returned no description. Please try the image again.")
+        raise VisionError(
+            "The local vision model returned no description on either attempt. "
+            "Check the local vision logs for safe per-attempt diagnostics and try again."
+        )
     return {"answer": answer, "ocr_text": ocr_text, "model": model, "offline": True}
