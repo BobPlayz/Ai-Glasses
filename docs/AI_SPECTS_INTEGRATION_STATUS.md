@@ -61,6 +61,6 @@ Live vision uses sequential one-shot frames and local inference, rather than cla
 
 ## Streaming voice responses
 
-The dashboard now consumes a token stream from local Ollama. It updates the answer text as tokens arrive and synthesizes each completed phrase with the local Piper voice while generation continues. Each generated WAV is played on the laptop and also placed in a bounded FIFO queue for the paired glasses speaker. This is phrase-level streaming, not word-by-word speech synthesis, because the TTS engine needs a useful phrase before producing natural audio.
+The dashboard now consumes a token stream from local Ollama. It updates the answer text as tokens arrive and synthesizes completed sentences, with a word-boundary fallback for long sentences, while generation continues. This reduces the wait for first audio without chopping every comma into a separate clip. Each generated WAV is played on the laptop and also placed in a bounded FIFO queue for the paired glasses speaker. Speech is phrase-level rather than word-by-word so prosody can stay coherent.
 
-Install the offline voices with `scripts\\install_british_voice.ps1`. If the Piper model files are missing, the streaming voice endpoint reports the missing local voice instead of silently claiming that speech worked. The legacy one-shot response endpoint remains available.
+English prefers the conversational Piper `en_US-ryan-medium` voice, falling back to `en_GB-alan-medium` when Ryan is not installed. Install the offline voices with `scripts\\install_british_voice.ps1`. If the Piper model files are missing, the streaming voice endpoint reports the missing local voice instead of silently claiming that speech worked. The legacy one-shot response endpoint remains available.
