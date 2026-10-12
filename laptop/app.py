@@ -33,6 +33,7 @@ DB_PATH = DATA_DIR / "memory.sqlite3"
 PIN_PATH = ROOT / ".dashboard-pin"
 DEVICE_TOKEN_PATH = ROOT / ".device-token"
 WAKE_PHRASE_PATH = DATA_DIR / "wake-phrase.txt"
+STYLE_MODE_PATH = DATA_DIR / "style-mode.json"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -147,6 +148,10 @@ class WakePhraseInput(BaseModel):
     phrase: Annotated[str, Field(min_length=3, max_length=80)]
 
 
+class StyleModeInput(BaseModel):
+    enabled: bool
+
+
 class CameraControlInput(BaseModel):
     enabled: bool
 
@@ -187,6 +192,14 @@ def verify_dashboard_pin(x_dashboard_pin: str | None = Header(default=None)) -> 
         raise HTTPException(status_code=503, detail="LAN mode is blocked until setup creates .dashboard-pin.")
     if not x_dashboard_pin or not hmac.compare_digest(x_dashboard_pin, expected):
         raise HTTPException(status_code=401, detail="Dashboard PIN is missing or incorrect.")
+
+
+def current_gen_z_mode() -> bool:
+    try:
+        data = json.loads(STYLE_MODE_PATH.read_text(encoding="utf-8"))
+        return bool(data.get("enabled", False)) if isinstance(data, dict) else False
+    except (OSError, json.JSONDecodeError):
+        return False
 
 
 def current_wake_phrase() -> str:
@@ -348,7 +361,7 @@ async def ask(payload: AskInput) -> dict:
     web_context, sources, research_warning = await research_context_for(question)
     try:
         reply = await run_in_threadpool(
-            ask_local, question, memories, recent_conversation_context(), web_context
+            ask_local, question, memories, recent_conversation_context(), web_context, current_gen_z_mode()
         )
     except OllamaError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -400,6 +413,17 @@ async def transcribe_audio(file: UploadFile = File(...)) -> dict:
     finally:
         path.unlink(missing_ok=True)
         await file.close()
+
+
+@app.get("/api/style-mode", dependencies=[Depends(verify_dashboard_pin)])
+def get_style_mode() -> dict:
+    return {"gen_z_mode": current_gen_z_mode()}
+
+
+@app.post("/api/style-mode", dependencies=[Depends(verify_dashboard_pin)])
+def set_style_mode(payload: StyleModeInput) -> dict:
+    STYLE_MODE_PATH.write_text(json.dumps({"enabled": payload.enabled}), encoding="utf-8")
+    return {"gen_z_mode": payload.enabled}
 
 
 @app.get("/api/wake-phrase", dependencies=[Depends(verify_dashboard_pin)])
@@ -584,7 +608,7 @@ async def device_audio(request: Request) -> dict:
     web_context, sources, research_warning = await research_context_for(question)
     try:
         reply = await run_in_threadpool(
-            ask_local, question, memories, recent_conversation_context(), web_context
+            ask_local, question, memories, recent_conversation_context(), web_context, current_gen_z_mode()
         )
     except OllamaError as exc:
         _voice_last_event = {"state": "error", "detail": str(exc)}
@@ -712,7 +736,7 @@ async def ask_stream(payload: AskInput) -> StreamingResponse:
                     "count": len(sources),
                     "warning": research_warning,
                 }, ensure_ascii=False) + "\n\n"
-            for item in stream_local(question, memories, recent_conversation_context(), web_context):
+            for item in stream_local(question, memories, recent_conversation_context(), web_context, current_gen_z_mode()):
                 if item["type"] == "token":
                     answer_parts.append(item["text"])
                     yield "data: " + json.dumps(item, ensure_ascii=False) + "\n\n"
@@ -873,13 +897,16 @@ button,input,textarea{font:inherit;letter-spacing:inherit}button{cursor:pointer;
 <div id="connectionHelp" class="tiny" style="margin-top:8px">The glasses connect over Wi-Fi in this firmware. USB is currently for power/programming, not a live data connection.</div></section>
 <section class="extras">
 <div class="panel" id="visionPanel"><h2>Vision</h2><p class="tiny">Image uploads are analyzed locally. Glasses capture needs explicit request, dashboard permission, and the physical privacy switch.</p><label for="visionQuestion">Visual question</label><textarea id="visionQuestion" placeholder="What am I looking at?"></textarea><label for="imageFile">Choose image</label><input id="imageFile" type="file" accept="image/jpeg,image/png,image/webp,image/bmp"><button onclick="askUploadedImage()">Analyze image</button><button onclick="askGlasses()">Capture once</button><button id="liveVisionButton" onclick="toggleLiveVision()">Start live vision</button><div id="liveVisionState" class="tiny" role="status">Live vision is off.</div><div id="visionAnswer" class="out"></div></div>
-<div class="panel" id="voiceSettingsPanel"><h2>Voice & wake phrase</h2><div id="voiceState" class="tiny" role="status">Offline voice ready when Piper voices are installed.</div><label for="wakePhrase">Wake phrase</label><input id="wakePhrase" maxlength="80" placeholder="hey glasses"><button onclick="saveWakePhrase()">Save phrase</button><div id="wakeStatus" class="tiny" style="margin-top:8px">Loading local setting...</div><label for="speakText">Speak text</label><textarea id="speakText" placeholder="Type a short phrase to test the voice..."></textarea><button onclick="speakText()">Speak offline</button><label for="audioFile">Transcribe audio file</label><input id="audioFile" type="file" accept="audio/*"><button onclick="transcribe()">Transcribe file locally</button><div style="margin-top:10px"><button id="recordButton" onclick="startMicTest()">Record laptop mic</button><button id="stopRecordButton" onclick="stopMicTest()" disabled>Stop & transcribe</button><span id="micTestState" class="tiny">Browser mic simulator: ready</span></div><div class="tiny">Laptop-only microphone test. Audio is sent to this laptop for local transcription and temporary files are deleted.</div><div id="speechAnswer" class="out"></div></div>
+<div class="panel" id="voiceSettingsPanel"><h2>Voice & wake phrase</h2><div id="voiceState" class="tiny" role="status">Offline voice ready when Piper voices are installed.</div><div class="connection-row"><b>Gen Z style</b><span id="genZModeState" class="tiny">Loading setting...</span><button id="genZModeButton" aria-pressed="false" onclick="toggleGenZMode()">Turn on Gen Z mode</button></div><div class="tiny">Switches JARVIS between casual Gen Z wording and standard JARVIS. Saved on this laptop. The underlying TTS voice model stays the same.</div><label for="wakePhrase">Wake phrase</label><input id="wakePhrase" maxlength="80" placeholder="hey glasses"><button onclick="saveWakePhrase()">Save phrase</button><div id="wakeStatus" class="tiny" style="margin-top:8px">Loading local setting...</div><label for="speakText">Speak text</label><textarea id="speakText" placeholder="Type a short phrase to test the voice..."></textarea><button onclick="speakText()">Speak offline</button><label for="audioFile">Transcribe audio file</label><input id="audioFile" type="file" accept="audio/*"><button onclick="transcribe()">Transcribe file locally</button><div style="margin-top:10px"><button id="recordButton" onclick="startMicTest()">Record laptop mic</button><button id="stopRecordButton" onclick="stopMicTest()" disabled>Stop & transcribe</button><span id="micTestState" class="tiny">Browser mic simulator: ready</span></div><div class="tiny">Laptop-only microphone test. Audio is sent to this laptop for local transcription and temporary files are deleted.</div><div id="speechAnswer" class="out"></div></div>
 <div class="panel" id="privacySettingsPanel"><h2>Memory & privacy</h2><label for="memory">Save local memory</label><textarea id="memory" placeholder="A useful fact to remember..."></textarea><button onclick="saveMemory()">Save memory</button><button onclick="loadMemories()">Refresh</button><button onclick="clearMemory()">Clear all</button><div id="memories" class="out"></div><hr style="border:0;border-top:1px solid #16404d;margin:14px 0"><div class="tiny">Dashboard camera: <b id="cameraControlState">disabled</b></div><div class="tiny">Device microphone: <b id="microphoneControlState">disabled</b></div><button id="microphoneControlButton" onclick="toggleMicrophoneControl()">Enable device microphone</button><div class="tiny">Microphone uploads are blocked until you explicitly enable them here. Audio is processed locally on this laptop.</div><div class="tiny">Physical indicator: <b id="indicatorState">unverified</b></div><button id="cameraControlButton" onclick="toggleCameraControl()">Enable camera control</button><div id="privacyBadge" class="privacy tiny" style="margin-top:9px">CAMERA OFF / UNVERIFIED</div></div>
 </section><div class="tiny" style="text-align:center;margin-top:14px">LOCAL-FIRST · NO CLOUD AI · CAMERA CAPTURE IS EXPLICITLY GATED</div>
 </main>
 <div class="commandbar"><span class="prompt">›</span><input id="command" placeholder="Type a question, then press Enter..." autocomplete="off"><button id="sendButton" onclick="sendCommand()">Send ↵</button></div>
 <script>
-let dashboardPin=sessionStorage.getItem('glasses-pin')||'',latestAnswer='',cameraEnabled=false,microphoneEnabled=false,aiBusy=false,coreActive=true,liveVisionActive=false,liveVisionAbort=null;
+let dashboardPin=sessionStorage.getItem('glasses-pin')||'',latestAnswer='',cameraEnabled=false,microphoneEnabled=false,aiBusy=false,coreActive=true,liveVisionActive=false,liveVisionAbort=null,genZMode=false;
+function updateGenZModeUI(){const b=document.getElementById('genZModeButton'),s=document.getElementById('genZModeState');if(!b||!s)return;b.textContent=genZMode?'Turn off Gen Z mode':'Turn on Gen Z mode';b.setAttribute('aria-pressed',String(genZMode));s.textContent=genZMode?'On · casual, confident style':'Off · standard JARVIS'}
+async function loadGenZMode(){try{const d=await api('/api/style-mode');genZMode=Boolean(d.gen_z_mode);updateGenZModeUI()}catch(e){document.getElementById('genZModeState').textContent='Unavailable: '+e.message}}
+async function toggleGenZMode(){const next=!genZMode;try{const d=await api('/api/style-mode',{method:'POST',body:JSON.stringify({enabled:next})});genZMode=Boolean(d.gen_z_mode);updateGenZModeUI();logActivity('Gen Z style '+(genZMode?'enabled':'disabled')+'.')}catch(e){document.getElementById('genZModeState').textContent=e.message}}
 async function toggleCore(){if(coreActive){try{await api('/api/device/live/control',{method:'POST',body:JSON.stringify({enabled:false})})}catch(e){}try{await api('/api/camera/control',{method:'POST',body:JSON.stringify({enabled:false})})}catch(e){}try{await api('/api/microphone/control',{method:'POST',body:JSON.stringify({enabled:false})})}catch(e){}coreActive=false;stopLiveVision(false);document.getElementById('command').disabled=true;document.getElementById('sendButton').disabled=true;document.getElementById('onlineState').textContent='PAUSED';document.getElementById('coreToggle').textContent='◉ AI CORE · OFF';document.getElementById('coreToggle').setAttribute('aria-pressed','false');logActivity('AI core paused; camera and microphone permissions revoked.')}else{coreActive=true;document.getElementById('command').disabled=false;document.getElementById('sendButton').disabled=false;document.getElementById('onlineState').textContent='ONLINE';document.getElementById('coreToggle').textContent='◉ AI CORE · ON';document.getElementById('coreToggle').setAttribute('aria-pressed','true');logActivity('AI core resumed. Camera and microphone remain disabled until explicitly enabled.')}}
 function showVision(){if(!coreActive){logActivity('Resume AI Core before using vision.');return}const opening=!document.body.classList.contains('vision-open');document.body.classList.toggle('vision-open',opening);document.body.classList.remove('settings-open');document.getElementById('visionToggle').setAttribute('aria-pressed',String(opening));document.getElementById('settingsToggle').setAttribute('aria-pressed','false');if(opening)document.getElementById('visionPanel').scrollIntoView({behavior:'smooth',block:'center'})}
 function toggleSettings(){const opening=!document.body.classList.contains('settings-open');document.body.classList.toggle('settings-open',opening);document.body.classList.remove('vision-open');document.getElementById('settingsToggle').setAttribute('aria-pressed',String(opening));document.getElementById('visionToggle').setAttribute('aria-pressed','false');if(opening)document.getElementById('connectionsPanel').scrollIntoView({behavior:'smooth',block:'start'})}
@@ -937,6 +964,6 @@ points.sort((a,b)=>a.z-b.z);for(const p of points){const alpha=.25+((p.z+1)/2)*.
 const glow=c.createRadialGradient(cx,cy,1,cx,cy,R*.3);glow.addColorStop(0,'rgba(239,255,255,.95)');glow.addColorStop(.16,'rgba(64,246,255,.85)');glow.addColorStop(.55,'rgba(0,201,232,.22)');glow.addColorStop(1,'rgba(0,201,232,0)');c.fillStyle=glow;c.beginPath();c.arc(cx,cy,R*.32,0,Math.PI*2);c.fill();c.restore();requestAnimationFrame(drawReactor)}
 resizeReactor();requestAnimationFrame(drawReactor);
 
-loadStatus();loadMemories();loadWakePhrase();tickClock();setInterval(tickClock,1000);setInterval(loadStatus,10000);logActivity('JARVIS core online. Local inference active; current questions can trigger web research.');
+loadGenZMode();loadStatus();loadMemories();loadWakePhrase();tickClock();setInterval(tickClock,1000);setInterval(loadStatus,10000);logActivity('JARVIS core online. Local inference active; current questions can trigger web research.');
 </script></body></html>
 """
