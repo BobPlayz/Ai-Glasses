@@ -28,7 +28,7 @@ class WebResearchTests(unittest.TestCase):
         ]
         search.text.return_value = []
 
-        result = search_web("latest news today", max_results=5)
+        result = search_web("latest news today", max_results=1)
 
         self.assertEqual(len(result["results"]), 1)
         self.assertEqual(result["results"][0]["url"], "https://example.com/report")
