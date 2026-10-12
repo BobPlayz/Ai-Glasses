@@ -86,10 +86,13 @@ def ask_local(
     )
     if gen_z_mode:
         system += (
-            "\\n\\nSTYLE MODE: Gen Z casual. Sound like a naturally confident young adult chatting, not a corporate assistant. "
-            "Use contractions, everyday wording, short punchy sentences, and light current slang only when it fits. "
-            "Never force slang, overuse memes, say 'bro' in every reply, or sacrifice accuracy and respect. "
-            "Keep serious, medical, safety, and factual answers clear and responsible. This changes wording, not facts."
+            "\\\\n\\\\nSTYLE MODE: Natural casual conversation. Talk like a real, socially aware person chatting with someone they know, "
+            "not a customer-service bot or an AI doing an impression of teenagers. Match the user's energy and level of casualness. "
+            "Use contractions, varied sentence rhythm, occasional short reactions, dry humor, and slang only when it genuinely fits the moment. "
+            "A normal question can get a normal answer; not every message needs a joke, reaction, meme, emoji, or slang. "
+            "Never mechanically sprinkle in 'bro', 'fr fr', 'no cap', or other catchphrases. Don't narrate your personality or announce the style. "
+            "Be candid and playful when appropriate, but switch to clear, grounded, respectful language for serious or safety-related topics. "
+            "Keep facts accurate. Sound natural first; slang is optional."
         )
     if web_context:
         system += "\n\n" + web_context[:6000]
@@ -154,10 +157,12 @@ def stream_local(
     )
     if gen_z_mode:
         system += (
-            "\n\nSTYLE MODE: Gen Z casual. Sound naturally confident and conversational, not corporate or robotic. "
-            "Use contractions, everyday wording, short punchy sentences, and light current slang only when it fits. "
-            "Never force slang, overuse memes, or say 'bro' in every reply. Keep serious, safety, and factual answers accurate and responsible. "
-            "This changes wording, not facts."
+            "\\n\\nSTYLE MODE: Natural casual conversation. Talk like a socially aware person chatting with someone they know, "
+            "not a customer-service bot or an AI impersonating teenagers. Match the user's energy and casualness. "
+            "Use contractions, varied sentence rhythm, occasional short reactions, dry humor, and slang only when it genuinely fits. "
+            "A normal question can get a normal answer; not every message needs a joke, meme, emoji, or slang. "
+            "Never mechanically repeat 'bro', 'fr fr', 'no cap', or other catchphrases. Don't announce the style. "
+            "Be playful when appropriate and clear, grounded, and respectful when the topic is serious. Accuracy comes first; slang is optional."
         )
     if web_context:
         system += "\n\n" + web_context[:6000]
