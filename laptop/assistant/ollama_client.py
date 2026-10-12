@@ -67,6 +67,7 @@ def ask_local(
     memories: list[str] | None = None,
     history: list[dict[str, str]] | None = None,
     web_context: str | None = None,
+    gen_z_mode: bool = False,
 ) -> ModelReply:
     question = question.strip()
     if not question:
@@ -83,6 +84,13 @@ def ask_local(
         "Relevant user-approved local memory notes:\\n"
         + (memory_lines or "(no relevant saved notes)")
     )
+    if gen_z_mode:
+        system += (
+            "\\n\\nSTYLE MODE: Gen Z casual. Sound like a naturally confident young adult chatting, not a corporate assistant. "
+            "Use contractions, everyday wording, short punchy sentences, and light current slang only when it fits. "
+            "Never force slang, overuse memes, say 'bro' in every reply, or sacrifice accuracy and respect. "
+            "Keep serious, medical, safety, and factual answers clear and responsible. This changes wording, not facts."
+        )
     if web_context:
         system += "\n\n" + web_context[:6000]
 
@@ -127,6 +135,7 @@ def stream_local(
     memories: list[str] | None = None,
     history: list[dict[str, str]] | None = None,
     web_context: str | None = None,
+    gen_z_mode: bool = False,
 ):
     """Yield local Ollama token events, then model metadata, for live text/TTS."""
     question = question.strip()
@@ -209,3 +218,12 @@ def stream_local(
             except OllamaError:
                 pass
         raise primary_error
+    if gen_z_mode:
+        system += (
+            "\\n\\nSTYLE MODE: Gen Z casual. Sound like a naturally confident young adult chatting, not a corporate assistant. "
+            "Use contractions, everyday wording, short punchy sentences, and light current slang only when it fits. "
+            "Never force slang, overuse memes, say 'bro' in every reply, or sacrifice accuracy and respect. "
+            "Keep serious, medical, safety, and factual answers clear and responsible. This changes wording, not facts."
+        )
+    if web_context:
+        system += "\\n\\n" + web_context[:6000]
