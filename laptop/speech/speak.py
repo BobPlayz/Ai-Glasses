@@ -52,6 +52,9 @@ def _tune_wav_bytes(audio: bytes) -> bytes:
 
 
 def online_voice_enabled() -> bool:
+    """Online neural TTS is the first-run default; an explicit saved choice wins."""
+    if not ONLINE_VOICE_MODE_PATH.exists():
+        return True
     try:
         import json
         data = json.loads(ONLINE_VOICE_MODE_PATH.read_text(encoding="utf-8"))
