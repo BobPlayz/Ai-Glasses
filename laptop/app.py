@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from laptop.assistant.ollama_client import OllamaError, ask_local, service_status, stream_local
+from laptop.assistant.web_research import WebResearchError, format_research_context, search_web, should_research
 from laptop.memory.store import search_memories
 from laptop.speech.speak import speak_local, synthesize_wav_local
 from laptop.speech.transcribe import SpeechError, transcribe_audio_file
@@ -97,6 +98,17 @@ def init_db() -> None:
 init_db()
 
 
+async def research_context_for(question: str) -> tuple[str | None, list[dict], str | None]:
+    """Research only freshness-sensitive questions; never send camera/audio/history."""
+    if not should_research(question):
+        return None, [], None
+    try:
+        bundle = await run_in_threadpool(search_web, question)
+        return format_research_context(bundle), bundle.get("results", []), None
+    except WebResearchError as exc:
+        return format_research_context({"results": []}), [], str(exc)
+
+
 class MemoryInput(BaseModel):
     content: Annotated[str, Field(min_length=1, max_length=1000)]
 
@@ -104,6 +116,11 @@ class MemoryInput(BaseModel):
 class AskInput(BaseModel):
     content: Annotated[str, Field(min_length=1, max_length=2000)]
     remember_summary: bool = False
+
+
+class ResearchInput(BaseModel):
+    query: Annotated[str, Field(min_length=1, max_length=300)]
+    max_results: int = Field(default=5, ge=1, le=5)
 
 
 class DeviceStatusInput(BaseModel):
@@ -328,8 +345,11 @@ def save_conversation(user_text: str, assistant_text: str, model: str, remember_
 async def ask(payload: AskInput) -> dict:
     question = payload.content.strip()
     memories = search_memories(DB_PATH, question)
+    web_context, sources, research_warning = await research_context_for(question)
     try:
-        reply = await run_in_threadpool(ask_local, question, memories, recent_conversation_context())
+        reply = await run_in_threadpool(
+            ask_local, question, memories, recent_conversation_context(), web_context
+        )
     except OllamaError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     save_conversation(question, reply.text, reply.model, payload.remember_summary)
@@ -341,7 +361,20 @@ async def ask(payload: AskInput) -> dict:
         "used_fallback": reply.used_fallback,
         "memory_notes_used": len(memories),
         "offline_inference": True,
+        "web_research_used": bool(sources),
+        "sources": sources,
+        "research_warning": research_warning,
     }
+
+
+@app.post("/api/research", dependencies=[Depends(verify_dashboard_pin)])
+async def research(payload: ResearchInput) -> dict:
+    """Explicit, user-triggered web search with source links."""
+    try:
+        bundle = await run_in_threadpool(search_web, payload.query, payload.max_results)
+    except WebResearchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return bundle
 
 
 @app.post("/api/speech/transcribe", dependencies=[Depends(verify_dashboard_pin)])
@@ -548,8 +581,11 @@ async def device_audio(request: Request) -> dict:
             return {"state": "visual_unavailable", "transcript": question, "answer": exc.detail, "offline": True}
 
     memories = search_memories(DB_PATH, question)
+    web_context, sources, research_warning = await research_context_for(question)
     try:
-        reply = await run_in_threadpool(ask_local, question, memories, recent_conversation_context())
+        reply = await run_in_threadpool(
+            ask_local, question, memories, recent_conversation_context(), web_context
+        )
     except OllamaError as exc:
         _voice_last_event = {"state": "error", "detail": str(exc)}
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -571,6 +607,9 @@ async def device_audio(request: Request) -> dict:
         "used_fallback": reply.used_fallback,
         "speech": speech,
         "offline": True,
+        "web_research_used": bool(sources),
+        "sources": sources,
+        "research_warning": research_warning,
     }
 
 
@@ -657,12 +696,23 @@ async def ask_stream(payload: AskInput) -> StreamingResponse:
     question = payload.content.strip()
     memories = search_memories(DB_PATH, question)
 
-    def events():
+    async def events():
         answer_parts: list[str] = []
         model_name = ""
         used_fallback = False
         try:
-            for item in stream_local(question, memories, recent_conversation_context()):
+            web_context = None
+            sources: list[dict] = []
+            research_warning = None
+            if should_research(question):
+                yield "data: " + json.dumps({"type": "research", "status": "searching"}, ensure_ascii=False) + "\n\n"
+                web_context, sources, research_warning = await research_context_for(question)
+                yield "data: " + json.dumps({
+                    "type": "research_complete",
+                    "count": len(sources),
+                    "warning": research_warning,
+                }, ensure_ascii=False) + "\n\n"
+            for item in stream_local(question, memories, recent_conversation_context(), web_context):
                 if item["type"] == "token":
                     answer_parts.append(item["text"])
                     yield "data: " + json.dumps(item, ensure_ascii=False) + "\n\n"
@@ -673,7 +723,15 @@ async def ask_stream(payload: AskInput) -> StreamingResponse:
             if not answer:
                 raise OllamaError("The local model returned an empty answer.")
             save_conversation(question, answer, model_name, payload.remember_summary)
-            yield "data: " + json.dumps({"type":"done","model":model_name,"used_fallback":used_fallback,"memory_notes_used":len(memories)}, ensure_ascii=False) + "\n\n"
+            yield "data: " + json.dumps({
+                "type": "done",
+                "model": model_name,
+                "used_fallback": used_fallback,
+                "memory_notes_used": len(memories),
+                "web_research_used": bool(sources),
+                "sources": sources,
+                "research_warning": research_warning,
+            }, ensure_ascii=False) + "\n\n"
         except OllamaError as exc:
             yield "data: " + json.dumps({"type":"error","message":str(exc)}, ensure_ascii=False) + "\n\n"
 
@@ -836,7 +894,7 @@ let speechSynthesisQueue=Promise.resolve(),speechBuffer='',speechAudioContext=nu
 async function ensureSpeechAudioContext(){if(!speechAudioContext)speechAudioContext=new (window.AudioContext||window.webkitAudioContext)();if(speechAudioContext.state==='suspended')await speechAudioContext.resume();return speechAudioContext}
 function speakChunk(text){const piece=String(text||'').trim();if(!piece)return speechSynthesisQueue;speechSynthesisQueue=speechSynthesisQueue.then(async()=>{try{const r=await fetch('/api/speech/render',{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin,'Content-Type':'application/json'},body:JSON.stringify({text:piece})});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'Local voice unavailable')}const raw=await r.arrayBuffer(),ctx=await ensureSpeechAudioContext(),buffer=await ctx.decodeAudioData(raw);const source=ctx.createBufferSource();source.buffer=buffer;source.connect(ctx.destination);const startAt=Math.max(ctx.currentTime+0.025,speechNextStart);source.start(startAt);speechNextStart=startAt+buffer.duration;}catch(e){document.getElementById('voiceState').textContent='Voice unavailable: '+e.message}});return speechSynthesisQueue}
 function queueCompletedSpeech(force=false){const sentenceBoundary=/[.!?।]+(?:["')\]]*)\s+|\n/g;let match;while((match=sentenceBoundary.exec(speechBuffer))){const end=match.index+match[0].length;const piece=speechBuffer.slice(0,end).trim();speechBuffer=speechBuffer.slice(end);sentenceBoundary.lastIndex=0;if(piece.length>1)speakChunk(piece);if(!speechBuffer)break}if(!force&&speechBuffer.length>=56){const limit=Math.min(speechBuffer.length,68),cut=speechBuffer.lastIndexOf(' ',limit);if(cut>=36){const piece=speechBuffer.slice(0,cut).trim();speechBuffer=speechBuffer.slice(cut+1);if(piece.length>1)speakChunk(piece)}}if(force&&speechBuffer.trim()){speakChunk(speechBuffer.trim());speechBuffer=''}}
-async function sendCommand(){let box=document.getElementById('command'),content=box.value.trim();if(!coreActive||!content||aiBusy)return;box.value='';aiBusy=true;speechBuffer='';document.getElementById('aiVal').textContent='BUSY';document.getElementById('aiBar').style.width='85%';document.getElementById('onlineState').textContent='THINKING';document.getElementById('sendButton').disabled=true;document.getElementById('voiceState').textContent='Answer will speak as local tokens arrive.';setTranscript(content,'Thinking locally…','LOCAL INFERENCE');logActivity('Question received: '+content.slice(0,90));let answer='',meta=null;try{document.getElementById('voiceState').textContent='Warming the original offline voice…';await api('/api/speech/prepare',{method:'POST',body:JSON.stringify({text:'Ready.'})});await ensureSpeechAudioContext();document.getElementById('voiceState').textContent='Voice ready. Streaming text and speech together.';const response=await fetch('/api/ask/stream',{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin,'Content-Type':'application/json'},body:JSON.stringify({content,remember_summary:false})});if(!response.ok){let err=await response.json().catch(()=>({}));throw new Error(err.detail||'Local inference failed')}const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';while(true){const {value,done}=await reader.read();if(done)break;pending+=decoder.decode(value,{stream:true});let cut;while((cut=pending.indexOf('\n\n'))>=0){const block=pending.slice(0,cut);pending=pending.slice(cut+2);const line=block.split('\n').find(x=>x.startsWith('data: '));if(!line)continue;const event=JSON.parse(line.slice(6));if(event.type==='token'){answer+=event.text;speechBuffer+=event.text;setTranscript(content,answer,'LOCAL MODEL · STREAMING + SPEAKING');queueCompletedSpeech(false)}else if(event.type==='done'){meta=event;queueCompletedSpeech(true)}else if(event.type==='error'){throw new Error(event.message)}}}if(!answer.trim())throw new Error('The local model returned no answer.');latestAnswer=answer;setTranscript(content,answer,'MODEL '+(meta?.model||'LOCAL')+(meta?.used_fallback?' · FALLBACK':'')+' · '+(meta?.memory_notes_used||0)+' MEMORY NOTES');document.getElementById('modelCaption').textContent='LOCAL AI · '+(meta?.model||'local model');document.getElementById('onlineState').textContent='ONLINE';document.getElementById('voiceState').textContent='Speaking response locally as it arrives.';logActivity('Streamed local answer using '+(meta?.model||'local model'));if(meta?.used_fallback)logActivity('Smaller fallback model used.')}catch(e){queueCompletedSpeech(true);setTranscript(content,answer||e.message,answer?'STREAM INTERRUPTED':'REQUEST FAILED');document.getElementById('onlineState').textContent='CHECK SYSTEM';logActivity('Error: '+e.message)}finally{aiBusy=false;document.getElementById('aiVal').textContent='IDLE';document.getElementById('aiBar').style.width='12%';document.getElementById('sendButton').disabled=false}}
+async function sendCommand(){let box=document.getElementById('command'),content=box.value.trim();if(!coreActive||!content||aiBusy)return;box.value='';aiBusy=true;speechBuffer='';document.getElementById('aiVal').textContent='BUSY';document.getElementById('aiBar').style.width='85%';document.getElementById('onlineState').textContent='THINKING';document.getElementById('sendButton').disabled=true;document.getElementById('voiceState').textContent='Answer will speak as local tokens arrive.';setTranscript(content,'Thinking locally…','LOCAL INFERENCE');logActivity('Question received: '+content.slice(0,90));let answer='',meta=null;try{document.getElementById('voiceState').textContent='Warming the original offline voice…';await api('/api/speech/prepare',{method:'POST',body:JSON.stringify({text:'Ready.'})});await ensureSpeechAudioContext();document.getElementById('voiceState').textContent='Voice ready. Streaming text and speech together.';const response=await fetch('/api/ask/stream',{method:'POST',headers:{'X-Dashboard-Pin':dashboardPin,'Content-Type':'application/json'},body:JSON.stringify({content,remember_summary:false})});if(!response.ok){let err=await response.json().catch(()=>({}));throw new Error(err.detail||'Local inference failed')}const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';while(true){const {value,done}=await reader.read();if(done)break;pending+=decoder.decode(value,{stream:true});let cut;while((cut=pending.indexOf('\n\n'))>=0){const block=pending.slice(0,cut);pending=pending.slice(cut+2);const line=block.split('\n').find(x=>x.startsWith('data: '));if(!line)continue;const event=JSON.parse(line.slice(6));if(event.type==='token'){answer+=event.text;speechBuffer+=event.text;setTranscript(content,answer,'LOCAL MODEL · STREAMING + SPEAKING');queueCompletedSpeech(false)}else if(event.type==='research'){document.getElementById('voiceState').textContent='Searching current web sources…'}else if(event.type==='research_complete'){document.getElementById('voiceState').textContent=event.count?'Sources found. Generating answer…':(event.warning?'Web search unavailable; answering without live sources.':'No sources found; generating answer…')}else if(event.type==='done'){meta=event;queueCompletedSpeech(true)}else if(event.type==='error'){throw new Error(event.message)}}}if(!answer.trim())throw new Error('The local model returned no answer.');latestAnswer=answer;const sourceText=meta?.sources?.length?'\\n\\nSources:\\n'+meta.sources.map((s,i)=>(i+1)+'. '+s.title+' — '+s.url).join('\\n'):'';setTranscript(content,answer+sourceText,'MODEL '+(meta?.model||'LOCAL')+(meta?.used_fallback?' · FALLBACK':'')+' · '+(meta?.memory_notes_used||0)+' MEMORY NOTES'+(meta?.web_research_used?' · WEB RESEARCH':'')+(meta?.research_warning?' · SEARCH UNAVAILABLE':''));document.getElementById('modelCaption').textContent='LOCAL AI · '+(meta?.model||'local model');document.getElementById('onlineState').textContent='ONLINE';document.getElementById('voiceState').textContent='Speaking response locally as it arrives.';logActivity('Streamed local answer using '+(meta?.model||'local model'));if(meta?.used_fallback)logActivity('Smaller fallback model used.')}catch(e){queueCompletedSpeech(true);setTranscript(content,answer||e.message,answer?'STREAM INTERRUPTED':'REQUEST FAILED');document.getElementById('onlineState').textContent='CHECK SYSTEM';logActivity('Error: '+e.message)}finally{aiBusy=false;document.getElementById('aiVal').textContent='IDLE';document.getElementById('aiBar').style.width='12%';document.getElementById('sendButton').disabled=false}}
 document.getElementById('command').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendCommand()}});
 function tickClock(){let d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString('en-GB',{hour12:false});document.getElementById('dateLine').textContent=d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}).toUpperCase()}
 async function loadStatus(){try{let s=await api('/api/status');document.getElementById('onlineState').textContent='ONLINE';document.getElementById('serviceLine').textContent=s.language_model;document.getElementById('modelCaption').textContent='LOCAL AI · '+s.language_model;cameraEnabled=Boolean(s.dashboard_camera_enabled);microphoneEnabled=Boolean(s.dashboard_microphone_enabled);document.getElementById('cameraControlState').textContent=cameraEnabled?'enabled':'disabled';document.getElementById('microphoneControlState').textContent=microphoneEnabled?'enabled':'disabled';document.getElementById('microphoneControlButton').textContent=microphoneEnabled?'Disable device microphone':'Enable device microphone';document.getElementById('cameraControlButton').textContent=cameraEnabled?'Disable camera control':'Enable camera control';document.getElementById('indicatorState').textContent=s.privacy_indicator;let good=String(s.camera).includes('capture allowed')&&s.privacy_indicator==='on';document.getElementById('privacyBadge').textContent=good?'CAMERA CAPTURE ACTIVE':'CAMERA OFF / UNVERIFIED';document.getElementById('privacyBadge').style.color=good?'var(--green)':'var(--gold)';document.getElementById('inboxText').innerHTML='NOT CONNECTED<br>Optional Gmail integration not configured.';refreshConnections();logOnce('status','Local services checked. Camera '+(good?'active':'off or unverified')+'.')}catch(e){document.getElementById('onlineState').textContent='LOCAL ONLY';document.getElementById('serviceLine').textContent=e.message;logOnce('status-error','Status check: '+e.message)}}
