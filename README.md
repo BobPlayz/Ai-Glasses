@@ -9,7 +9,7 @@ A local-first smart-glasses prototype for a school exhibition. The Windows lapto
 - Local Ollama text assistant with primary and fallback models
 - SQLite useful-fact memory and opt-in short conversation summaries
 - Offline multilingual Whisper transcription adapter and cached-model setup
-- Cached Piper neural speech in British English and Telugu, with Windows SAPI/eSpeak fallback
+- Switchable Microsoft neural online TTS for natural English/Telugu speech, with cached offline Piper fallback
 - Local Tesseract OCR using English and Telugu language data
 - Local vision adapter for an explicitly supplied image, combined with OCR results
 - Live glasses vision using sequential privacy-gated JPEG snapshots and local vision/OCR inference; bounded private-LAN MJPEG helper for compatible sources
@@ -44,9 +44,11 @@ For an existing setup, install and verify the offline male English and Telugu vo
 
     powershell -ExecutionPolicy Bypass -File .\scripts\install_british_voice.ps1
 
-### Offline speech
+### Speech voices
 
-Speech uses cached Piper neural voices: male Alan for British English and the male Venkatesh voice for Telugu. Speech generation runs locally and requires no API key, subscription, or cloud TTS service. English can fall back to an installed Windows voice if Piper is unavailable; Telugu intentionally reports a failure rather than mispronouncing Telugu through an English voice.
+In Settings → Voice & wake phrase, enable **Natural online voice** for neural speech through `edge-tts`. It uses a natural US English neural voice and an Indian Telugu neural voice, and requires internet access. Text sent for speech is processed by the online speech service. This community integration is not an official Microsoft Speech SDK integration and may occasionally stop working if the upstream service changes.
+
+Turn it off to use cached Piper neural voices locally: Alan for British English and Venkatesh for Telugu. Offline speech needs no API key or cloud service. The separate **Gen Z style** toggle controls wording, not the audio voice. Online speech is used for browser playback and paired-device audio; if online synthesis fails, the existing offline voice remains available.
 
 For laptop-only mode:
 
