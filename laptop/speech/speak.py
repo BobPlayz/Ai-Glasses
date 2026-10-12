@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import threading
 import tempfile
 import wave
@@ -122,3 +123,36 @@ def speak_local(text: str) -> dict:
     raise SpeechOutputError(
         "Offline speech failed. Install the Piper voice files or check that a Windows speech voice is installed."
     )
+
+
+def synthesize_wav_local(text: str, max_chars: int = 220) -> bytes | None:
+    """Render bounded offline Piper speech to mono PCM WAV bytes for the paired glasses.
+
+    Returns None when Piper assets are unavailable, allowing laptop-output fallback.
+    This function never calls a cloud service and does not play audio itself.
+    """
+    text = " ".join(text.strip().split())[:max(1, min(max_chars, 500))]
+    if not text:
+        return None
+    voice_key = "te_IN-venkatesh-medium" if _is_telugu(text) else "en_GB-alan-medium"
+    model_path = VOICE_DIR / f"{voice_key}.onnx"
+    config_path = VOICE_DIR / f"{voice_key}.onnx.json"
+    if not model_path.is_file() or not config_path.is_file():
+        return None
+    try:
+        from piper import PiperVoice
+        with _voice_lock:
+            voice = _voice_cache.get(voice_key)
+            if voice is None:
+                voice = PiperVoice.load(str(model_path), config_path=str(config_path))
+                _voice_cache[voice_key] = voice
+        output = io.BytesIO()
+        with _synthesis_lock:
+            with wave.open(output, "wb") as wav_file:
+                voice.synthesize_wav(text, wav_file)
+        audio = output.getvalue()
+        if not audio.startswith(b"RIFF") or audio[8:12] != b"WAVE" or len(audio) > 900_000:
+            return None
+        return audio
+    except Exception:
+        return None

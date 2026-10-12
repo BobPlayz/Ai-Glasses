@@ -21,6 +21,10 @@ static constexpr unsigned long COMMAND_INTERVAL_MS = 300;
 static constexpr size_t MAX_JPEG_BYTES = 8 * 1024 * 1024;
 static constexpr uint32_t MIC_SAMPLE_RATE = 16000;
 static constexpr size_t MIC_SAMPLES = 32000; // two seconds, mono, 16-bit PCM
+static constexpr int SPEAKER_BCLK_PIN = 4; // XIAO D3
+static constexpr int SPEAKER_LRCLK_PIN = 5; // XIAO D4
+static constexpr int SPEAKER_DATA_PIN = 6; // XIAO D5
+static constexpr size_t MAX_SPEECH_BYTES = 900000;
 
 static unsigned long lastStatus = 0;
 static unsigned long lastCommand = 0;
@@ -30,6 +34,7 @@ static bool microphoneReady = false;
 static bool dashboardCameraAllowed = false;
 static volatile bool dashboardMicrophoneAllowed = false; // Server opt-in defaults to false.
 static int16_t* microphoneSamples = nullptr;
+static bool speakerReady = false;
 
 bool privacySwitchEnabled() {
   return digitalRead(PRIVACY_SWITCH_PIN) == LOW;
@@ -234,6 +239,84 @@ bool uploadFrame(const String& requestId, camera_fb_t* frame) {
   return code >= 200 && code < 300;
 }
 
+uint16_t readLe16(const uint8_t* p) { return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8); }
+uint32_t readLe32(const uint8_t* p) { return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24); }
+
+bool playWavBuffer(const uint8_t* wav, size_t length) {
+  if (!speakerReady || !wav || length < 44 || length > MAX_SPEECH_BYTES || memcmp(wav, "RIFF", 4) != 0 || memcmp(wav + 8, "WAVE", 4) != 0) return false;
+  uint16_t channels = 0, bits = 0, format = 0;
+  uint32_t sampleRate = 0, dataLength = 0;
+  const uint8_t* pcm = nullptr;
+  size_t offset = 12;
+  while (offset + 8 <= length) {
+    uint32_t chunkSize = readLe32(wav + offset + 4);
+    size_t chunkStart = offset + 8;
+    if (chunkSize > length - chunkStart) return false;
+    if (memcmp(wav + offset, "fmt ", 4) == 0 && chunkSize >= 16) {
+      format = readLe16(wav + chunkStart);
+      channels = readLe16(wav + chunkStart + 2);
+      sampleRate = readLe32(wav + chunkStart + 4);
+      bits = readLe16(wav + chunkStart + 14);
+    } else if (memcmp(wav + offset, "data", 4) == 0) {
+      pcm = wav + chunkStart;
+      dataLength = chunkSize;
+    }
+    offset = chunkStart + chunkSize + (chunkSize & 1);
+  }
+  if (format != 1 || channels != 1 || bits != 16 || sampleRate < 16000 || sampleRate > 48000 || !pcm || !dataLength || dataLength > length) return false;
+  i2s_driver_uninstall(I2S_NUM_1);
+  i2s_config_t config = {};
+  config.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_TX);
+  config.sample_rate = sampleRate;
+  config.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+  config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+  config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+  config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+  config.dma_buf_count = 8;
+  config.dma_buf_len = 512;
+  config.use_apll = false;
+  config.tx_desc_auto_clear = true;
+  config.fixed_mclk = 0;
+  if (i2s_driver_install(I2S_NUM_1, &config, 0, nullptr) != ESP_OK) return false;
+  i2s_pin_config_t pins = {};
+  pins.bck_io_num = SPEAKER_BCLK_PIN;
+  pins.ws_io_num = SPEAKER_LRCLK_PIN;
+  pins.data_out_num = SPEAKER_DATA_PIN;
+  pins.data_in_num = I2S_PIN_NO_CHANGE;
+  if (i2s_set_pin(I2S_NUM_1, &pins) != ESP_OK) { i2s_driver_uninstall(I2S_NUM_1); return false; }
+  size_t offsetBytes = 0;
+  while (offsetBytes < dataLength) {
+    size_t written = 0;
+    esp_err_t err = i2s_write(I2S_NUM_1, pcm + offsetBytes, dataLength - offsetBytes, &written, pdMS_TO_TICKS(3000));
+    if (err != ESP_OK || written == 0) { i2s_driver_uninstall(I2S_NUM_1); return false; }
+    offsetBytes += written;
+  }
+  i2s_zero_dma_buffer(I2S_NUM_1);
+  i2s_driver_uninstall(I2S_NUM_1);
+  return true;
+}
+
+bool fetchAndPlaySpeech() {
+  if (WiFi.status() != WL_CONNECTED || !speakerReady) return false;
+  HTTPClient http;
+  http.begin(apiUrl("/api/device/speech"));
+  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+  http.setTimeout(15000);
+  int code = http.GET();
+  if (code != 200) { http.end(); return false; }
+  int declaredSize = http.getSize();
+  if (declaredSize <= 44 || static_cast<size_t>(declaredSize) > MAX_SPEECH_BYTES) { http.end(); return false; }
+  uint8_t* buffer = static_cast<uint8_t*>(malloc(static_cast<size_t>(declaredSize)));
+  if (!buffer) { http.end(); return false; }
+  WiFiClient* stream = http.getStreamPtr();
+  size_t received = stream->readBytes(buffer, static_cast<size_t>(declaredSize));
+  http.end();
+  bool played = received == static_cast<size_t>(declaredSize) && playWavBuffer(buffer, received);
+  free(buffer);
+  Serial.printf("Glasses speaker: %s\n", played ? "played response" : "audio unavailable / incompatible WAV");
+  return played;
+}
+
 void checkCommand() {
   if (WiFi.status() != WL_CONNECTED) return;
   HTTPClient http;
@@ -248,6 +331,7 @@ void checkCommand() {
   if (deserializeJson(doc, body) != DeserializationError::Ok) return;
   dashboardCameraAllowed = doc["camera_allowed"] | false;
   dashboardMicrophoneAllowed = doc["microphone_allowed"] | false;
+  if (doc["speech_pending"] == true) fetchAndPlaySpeech();
   if (!dashboardCameraAllowed || !privacySwitchEnabled()) {
     if (cameraReady) {
       esp_camera_deinit();
@@ -320,6 +404,8 @@ void setup() {
   // Camera remains uninitialised until BOTH the dashboard control and physical
   // switch allow it. The server sends camera_allowed=false by default.
   Serial.println("Camera is disabled until dashboard control and physical switch allow it.");
+  // Speaker TX uses I2S_NUM_1 and exposed GPIO4/5/6; PDM mic remains on I2S_NUM_0.
+  speakerReady = true;
   microphoneReady = initMicrophone();
   Serial.printf("Microphone: %s\n", microphoneReady ? "ready" : "unavailable");
   postStatus();

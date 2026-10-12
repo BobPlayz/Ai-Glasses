@@ -4,18 +4,18 @@ A local-first smart-glasses prototype for a school exhibition. The Windows lapto
 
 ## Included in this repository
 
-- Futuristic dark/cyan local dashboard
-- Connections hub for glasses Wi-Fi link status, camera/microphone permission toggles, laptop microphone connect/disconnect, and local speaker test
+- Existing dark/cyan reactor dashboard amplified with a perspective-grid background and three primary controls: AI Core, Vision, Settings
+- Detailed device connections, microphone, voice, and memory controls tucked into Settings
 - Local Ollama text assistant with primary and fallback models
 - SQLite useful-fact memory and opt-in short conversation summaries
 - Offline multilingual Whisper transcription adapter and cached-model setup
 - Cached Piper neural speech in British English and Telugu, with Windows SAPI/eSpeak fallback
 - Local Tesseract OCR using English and Telugu language data
 - Local vision adapter for an explicitly supplied image, combined with OCR results
-- Experimental bounded MJPEG reader and throttled live-frame inference helper in `laptop/vision/live_stream.py` (not yet wired to the dashboard or XIAO firmware)
+- Live glasses vision using sequential privacy-gated JPEG snapshots and local vision/OCR inference; bounded private-LAN MJPEG helper for compatible sources
 - Dashboard camera enable/disable control, default off
 - Explicit device microphone enable/disable control, default off, with server-side upload rejection until opted in
-- Device API with pairing token, camera command queue, and one-shot JPEG upload
+- Paired-device API with token authentication, camera command queue, one-shot and sequential live JPEG capture, and bounded local Piper WAV delivery to the glasses speaker
 - Candidate ESP32-S3 camera, privacy-switch, indicator, and microphone firmware
 - Hardware integration status and remaining work documented in `docs/AI_SPECTS_INTEGRATION_STATUS.md`
 - Configurable wake phrase and local audio chunk processing
@@ -84,14 +84,22 @@ These are configuration candidates. Actual model latency, memory pressure, Telug
 ## Privacy defaults
 
 - Dashboard camera control starts disabled.
-- Capture requires a visual question, dashboard camera control enabled, a connected device, and the physical switch enabled.
+- Capture requires dashboard camera permission, a connected device, and the physical switch enabled. Live vision repeats single-frame capture and local inference until stopped.
 - Firmware turns on the capture indicator while obtaining a frame and stops the camera driver when the dashboard control or physical switch disables it.
 - Device microphone is disabled by default. Audio capture/upload starts only after explicit dashboard opt-in; the laptop server rejects device audio while disabled, and firmware stops reading/uploading when the permission is revoked. When enabled, short audio chunks are sent to this laptop for local processing. Temporary WAV files are deleted after processing; recognized transcripts are not saved unless the user explicitly asks to save a summary.
 - Memory is local and can be inspected or cleared.
 - The dashboard is localhost-only by default. LAN mode requires the generated PIN.
 - Device credentials, PINs, local memory, recordings, and model files are excluded from Git.
 
-The current firmware uses privacy-gated JPEG snapshots rather than a continuous XIAO video stream, and response speech currently plays through the laptop output rather than the MAX98357 glasses speaker. See `docs/AI_SPECTS_INTEGRATION_STATUS.md` before hardware assembly. A firmware-controlled switch is not an electrical camera power disconnect. Review the wiring with a qualified adult/technician before assembly. Do not improvise lithium battery or charging circuits.
+The XIAO camera path uses sequential privacy-gated snapshots, not a high-frame-rate raw video stream. When cached Piper voices are available, assistant responses can be queued to the MAX98357 through I2S; the laptop output remains the fallback. The selected 2-inch speaker's impedance/power rating and the 5 V power module wiring must be verified before use. **BOM safety gap:** the locked list does not explicitly include an external camera indicator LED. Do not use the camera on a wearable until a clearly visible indicator is confirmed or added. A firmware switch is not an electrical camera power disconnect. Have an experienced adult/technician verify wiring and the power path; do not improvise battery or charging circuits.
+
+## Dashboard controls
+
+- **AI Core** pauses dashboard interaction and revokes camera/microphone permissions. Resuming does not silently re-enable them.
+- **Vision** opens image upload, one-shot capture, or sequential live vision.
+- **Settings** contains connection status, camera/microphone permissions, voice, and local memory controls.
+
+Live glasses-speaker playback uses cached local Piper WAV audio, requires the paired firmware and a compatible MAX98357/speaker connection, and is not physically verified until the hardware is assembled.
 
 ## Tests and status
 
