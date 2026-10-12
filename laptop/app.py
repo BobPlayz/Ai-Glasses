@@ -820,7 +820,7 @@ async def device_capture_result(request_id: str, file: UploadFile = File(...)) -
         raw = await file.read(8 * 1024 * 1024 + 1)
         if not raw or len(raw) > 8 * 1024 * 1024:
             raise HTTPException(status_code=413, detail="Frame is empty or exceeds the 8 MB limit.")
-        if not raw.startswith(b"\\xff\\xd8\\xff"):
+        if not raw.startswith(bytes.fromhex("ffd8ff")):
             raise HTTPException(status_code=415, detail="Glasses camera must upload a JPEG frame.")
         # Recheck revocable controls after the upload has finished, not just at request start.
         now = time.time()
