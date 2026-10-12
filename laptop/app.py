@@ -162,7 +162,7 @@ class MicrophoneControlInput(BaseModel):
 
 
 def queue_device_audio(audio: bytes) -> bool:
-    """Queue one bounded Piper WAV for the authenticated paired device."""
+    """Queue one bounded WAV for the authenticated paired device."""
     if not audio or len(audio) > 900_000:
         return False
     _speech_queue.append((audio, time.time()))
@@ -172,6 +172,14 @@ def queue_device_audio(audio: bytes) -> bool:
 def queue_device_speech(text: str) -> bool:
     audio = synthesize_wav_local(short_speech_text(text))
     return queue_device_audio(audio) if audio else False
+
+
+def has_pending_device_speech() -> bool:
+    """Drop expired audio and report whether the paired device has audio to fetch."""
+    now = time.time()
+    while _speech_queue and now - _speech_queue[0][1] >= 30:
+        _speech_queue.popleft()
+    return bool(_speech_queue)
 
 
 def read_secret(path: Path) -> str:
@@ -688,7 +696,7 @@ def device_command() -> dict:
     global _capture_request
     if _capture_request and _capture_request.get("expires_at", 0) < time.time():
         _capture_request = None
-    speech_pending = bool(_speech_queue) and time.time() - _speech_queued_at < 30
+    speech_pending = has_pending_device_speech()
     return {"capture": _capture_request or None, "camera_allowed": _dashboard_camera_enabled, "microphone_allowed": _dashboard_microphone_enabled, "live_vision_enabled": _live_vision_enabled, "speech_pending": speech_pending}
 
 
@@ -707,12 +715,12 @@ class SpeechRenderInput(BaseModel):
 
 @app.post("/api/speech/prepare", dependencies=[Depends(verify_dashboard_pin)])
 async def prepare_speech(payload: SpeechRenderInput) -> dict:
-    """Warm the existing offline voice and cache its model before generation starts."""
+    """Warm the currently selected online/offline voice before generation starts."""
     text = " ".join(payload.text.split()).strip()[:80] or "Ready."
     audio = await run_in_threadpool(synthesize_wav_local, text, 80)
     if not audio:
-        raise HTTPException(status_code=503, detail="Offline Piper voice is not installed. Run scripts\\install_british_voice.ps1.")
-    return {"ready": True, "offline": True}
+        raise HTTPException(status_code=503, detail="Speech synthesis is unavailable. Check internet access for online voice or install the offline Piper voice files.")
+    return {"ready": True, "online_voice_enabled": online_voice_enabled()}
 
 
 @app.post("/api/speech/render", dependencies=[Depends(verify_dashboard_pin)])
@@ -905,11 +913,11 @@ button,input,textarea{font:inherit;letter-spacing:inherit}button{cursor:pointer;
 <div class="connection-row"><b>Glasses camera</b><span id="glassesCameraLinkState" class="tiny">Disabled</span><button id="connectionCameraButton" onclick="toggleCameraControl()">Enable camera</button></div>
 <div class="connection-row"><b>Glasses microphone</b><span id="glassesMicrophoneLinkState" class="tiny">Disabled</span><button id="connectionMicrophoneButton" onclick="toggleMicrophoneControl()">Enable microphone</button></div>
 <div class="connection-row"><b>Laptop microphone</b><span id="laptopMicrophoneLinkState" class="tiny">Disconnected</span><button id="laptopMicConnectButton" onclick="startMicTest()">Connect / record</button><button id="laptopMicDisconnectButton" onclick="disconnectLaptopMic()" disabled>Disconnect</button></div>
-<div class="connection-row"><b>Offline voice output</b><span id="speakerLinkState" class="tiny">Ready to test</span><button onclick="testVoiceOutput()">Test speaker</button></div>
+<div class="connection-row"><b>Speech output</b><span id="speakerLinkState" class="tiny">Ready to test</span><button onclick="testVoiceOutput()">Test speaker</button></div>
 <div id="connectionHelp" class="tiny" style="margin-top:8px">The glasses connect over Wi-Fi in this firmware. USB is currently for power/programming, not a live data connection.</div></section>
 <section class="extras">
 <div class="panel" id="visionPanel"><h2>Vision</h2><p class="tiny">Image uploads are analyzed locally. Glasses capture needs explicit request, dashboard permission, and the physical privacy switch.</p><label for="visionQuestion">Visual question</label><textarea id="visionQuestion" placeholder="What am I looking at?"></textarea><label for="imageFile">Choose image</label><input id="imageFile" type="file" accept="image/jpeg,image/png,image/webp,image/bmp"><button onclick="askUploadedImage()">Analyze image</button><button onclick="askGlasses()">Capture once</button><button id="liveVisionButton" onclick="toggleLiveVision()">Start live vision</button><div id="liveVisionState" class="tiny" role="status">Live vision is off.</div><div id="visionAnswer" class="out"></div></div>
-<div class="panel" id="voiceSettingsPanel"><h2>Voice & wake phrase</h2><div id="voiceState" class="tiny" role="status">Offline voice ready when Piper voices are installed.</div><div class="connection-row"><b>Natural online voice</b><span id="onlineVoiceModeState" class="tiny">Loading setting...</span><button id="onlineVoiceModeButton" aria-pressed="false" onclick="toggleOnlineVoiceMode()">Turn on online voice</button></div><div class="tiny">Uses Microsoft neural speech online for a more natural voice. Requires internet. If unavailable, speech falls back to the installed offline voice. Text entered for speech is sent to the speech provider.</div><div class="connection-row"><b>Gen Z style</b><span id="genZModeState" class="tiny">Loading setting...</span><button id="genZModeButton" aria-pressed="false" onclick="toggleGenZMode()">Turn on Gen Z mode</button></div><div class="tiny">Switches JARVIS between casual Gen Z wording and standard JARVIS. Saved on this laptop. The underlying TTS voice model stays the same.</div><label for="wakePhrase">Wake phrase</label><input id="wakePhrase" maxlength="80" placeholder="hey glasses"><button onclick="saveWakePhrase()">Save phrase</button><div id="wakeStatus" class="tiny" style="margin-top:8px">Loading local setting...</div><label for="speakText">Speak text</label><textarea id="speakText" placeholder="Type a short phrase to test the voice..."></textarea><button onclick="speakText()">Speak test voice</button><label for="audioFile">Transcribe audio file</label><input id="audioFile" type="file" accept="audio/*"><button onclick="transcribe()">Transcribe file locally</button><div style="margin-top:10px"><button id="recordButton" onclick="startMicTest()">Record laptop mic</button><button id="stopRecordButton" onclick="stopMicTest()" disabled>Stop & transcribe</button><span id="micTestState" class="tiny">Browser mic simulator: ready</span></div><div class="tiny">Laptop-only microphone test. Audio is sent to this laptop for local transcription and temporary files are deleted.</div><div id="speechAnswer" class="out"></div></div>
+<div class="panel" id="voiceSettingsPanel"><h2>Voice & wake phrase</h2><div id="voiceState" class="tiny" role="status">Online neural voice is the default; offline fallback is available when installed.</div><div class="connection-row"><b>Natural online voice</b><span id="onlineVoiceModeState" class="tiny">Loading setting...</span><button id="onlineVoiceModeButton" aria-pressed="false" onclick="toggleOnlineVoiceMode()">Turn on online voice</button></div><div class="tiny">Uses Microsoft neural speech online for a more natural voice. Requires internet. If unavailable, speech falls back to the installed offline voice. Text entered for speech is sent to the speech provider.</div><div class="connection-row"><b>Gen Z style</b><span id="genZModeState" class="tiny">Loading setting...</span><button id="genZModeButton" aria-pressed="false" onclick="toggleGenZMode()">Turn on Gen Z mode</button></div><div class="tiny">Switches JARVIS between casual Gen Z wording and standard JARVIS. Saved on this laptop. The underlying TTS voice model stays the same.</div><label for="wakePhrase">Wake phrase</label><input id="wakePhrase" maxlength="80" placeholder="hey glasses"><button onclick="saveWakePhrase()">Save phrase</button><div id="wakeStatus" class="tiny" style="margin-top:8px">Loading local setting...</div><label for="speakText">Speak text</label><textarea id="speakText" placeholder="Type a short phrase to test the voice..."></textarea><button onclick="speakText()">Speak test voice</button><label for="audioFile">Transcribe audio file</label><input id="audioFile" type="file" accept="audio/*"><button onclick="transcribe()">Transcribe file locally</button><div style="margin-top:10px"><button id="recordButton" onclick="startMicTest()">Record laptop mic</button><button id="stopRecordButton" onclick="stopMicTest()" disabled>Stop & transcribe</button><span id="micTestState" class="tiny">Browser mic simulator: ready</span></div><div class="tiny">Laptop-only microphone test. Audio is sent to this laptop for local transcription and temporary files are deleted.</div><div id="speechAnswer" class="out"></div></div>
 <div class="panel" id="privacySettingsPanel"><h2>Memory & privacy</h2><label for="memory">Save local memory</label><textarea id="memory" placeholder="A useful fact to remember..."></textarea><button onclick="saveMemory()">Save memory</button><button onclick="loadMemories()">Refresh</button><button onclick="clearMemory()">Clear all</button><div id="memories" class="out"></div><hr style="border:0;border-top:1px solid #16404d;margin:14px 0"><div class="tiny">Dashboard camera: <b id="cameraControlState">disabled</b></div><div class="tiny">Device microphone: <b id="microphoneControlState">disabled</b></div><button id="microphoneControlButton" onclick="toggleMicrophoneControl()">Enable device microphone</button><div class="tiny">Microphone uploads are blocked until you explicitly enable them here. Audio is processed locally on this laptop.</div><div class="tiny">Physical indicator: <b id="indicatorState">unverified</b></div><button id="cameraControlButton" onclick="toggleCameraControl()">Enable camera control</button><div id="privacyBadge" class="privacy tiny" style="margin-top:9px">CAMERA OFF / UNVERIFIED</div></div>
 </section><div class="tiny" style="text-align:center;margin-top:14px">LOCAL AI · ONLINE SPEECH BY DEFAULT · CAMERA CAPTURE IS EXPLICITLY GATED</div>
 </main>
