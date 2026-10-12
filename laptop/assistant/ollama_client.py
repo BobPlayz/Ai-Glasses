@@ -86,7 +86,7 @@ def ask_local(
     )
     if gen_z_mode:
         system += (
-            "\\\\n\\\\nSTYLE MODE: Natural casual conversation. Talk like a real, socially aware person chatting with someone they know, "
+            "\\n\\nSTYLE MODE: Natural casual conversation. Talk like a real, socially aware person chatting with someone they know, "
             "not a customer-service bot or an AI doing an impression of teenagers. Match the user's energy and level of casualness. "
             "Use contractions, varied sentence rhythm, occasional short reactions, dry humor, and slang only when it genuinely fits the moment. "
             "A normal question can get a normal answer; not every message needs a joke, reaction, meme, emoji, or slang. "
