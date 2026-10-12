@@ -27,7 +27,7 @@ From the repository directory in Windows Command Prompt:
 
 ```bat
 python -m pip install -r requirements.txt
-python -m unittest tests.test_web_research -v
+python -m unittest discover -s tests -p "test_web_research.py" -v
 python -m unittest discover -s tests -v
 ```
 
