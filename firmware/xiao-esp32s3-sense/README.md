@@ -11,7 +11,7 @@ This is candidate firmware, not verified firmware. Do not flash until the exact 
 - Checks the physical privacy switch before capture and illuminates the external indicator during capture.
 - Uploads one JPEG frame to /api/device/capture-result.
 - Captures short mono 16 kHz audio chunks from the candidate onboard PDM microphone and sends WAV data to /api/device/audio.
-- The laptop performs wake-phrase detection, speech recognition, local model inference, and best-effort offline speech output.
+- The laptop performs wake-phrase detection, speech recognition, and local model inference. Speech output uses online neural TTS by default unless the dashboard toggle is disabled, then falls back to cached offline speech when available.
 
 ## Wiring assumptions to verify before power-up
 - Privacy switch: GPIO 2 to GND means camera capture enabled, using internal pull-up.
