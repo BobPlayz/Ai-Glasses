@@ -232,7 +232,9 @@ def synthesize_wav_local(text: str, max_chars: int = 220) -> bytes | None:
     if not text:
         return None
     if online_voice_enabled():
-        return _synthesize_online_wav(text)
+        online_audio = _synthesize_online_wav(text)
+        if online_audio:
+            return online_audio
     voice_key = "te_IN-venkatesh-medium" if _is_telugu(text) else "en_GB-alan-medium"
     model_path = VOICE_DIR / f"{voice_key}.onnx"
     config_path = VOICE_DIR / f"{voice_key}.onnx.json"
