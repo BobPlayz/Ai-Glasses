@@ -798,17 +798,44 @@ def live_vision_control(payload: CameraControlInput) -> dict:
 @app.post("/api/device/capture-result", dependencies=[Depends(verify_device_token)])
 async def device_capture_result(request_id: str, file: UploadFile = File(...)) -> dict:
     global _capture_request, _last_frame
+    now = time.time()
     if not _capture_request or request_id != _capture_request["id"]:
         raise HTTPException(status_code=409, detail="No matching capture request is active.")
-    if not _last_device_status.get("privacy_switch_enabled") or not _last_device_status.get("indicator_on"):
-        raise HTTPException(status_code=403, detail="Device status does not confirm privacy switch and indicator.")
-    raw = await file.read(8 * 1024 * 1024 + 1)
-    if not raw or len(raw) > 8 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Frame is empty or exceeds the 8 MB limit.")
-    _last_frame = {"request_id": request_id, "bytes": raw, "created_at": time.time()}
-    _capture_request = None
-    await file.close()
-    return {"accepted": True, "request_id": request_id}
+    if _capture_request.get("expires_at", 0) < now:
+        _capture_request = None
+        raise HTTPException(status_code=409, detail="Capture request expired. Request a fresh frame.")
+    if not _dashboard_camera_enabled:
+        raise HTTPException(status_code=403, detail="Dashboard camera permission is disabled.")
+    status_age = now - float(_last_device_status.get("updated_at", 0) or 0)
+    if (
+        not _last_device_status.get("connected")
+        or status_age > 12
+        or not _last_device_status.get("camera_enabled")
+        or not _last_device_status.get("privacy_switch_enabled")
+        or not _last_device_status.get("indicator_on")
+    ):
+        raise HTTPException(status_code=403, detail="Fresh device status must confirm camera permission, physical switch, and indicator.")
+    try:
+        raw = await file.read(8 * 1024 * 1024 + 1)
+        if not raw or len(raw) > 8 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Frame is empty or exceeds the 8 MB limit.")
+        if not raw.startswith(b"\\xff\\xd8\\xff"):
+            raise HTTPException(status_code=415, detail="Glasses camera must upload a JPEG frame.")
+        # Recheck revocable controls after the upload has finished, not just at request start.
+        now = time.time()
+        status_age = now - float(_last_device_status.get("updated_at", 0) or 0)
+        if (
+            not _dashboard_camera_enabled
+            or not _last_device_status.get("privacy_switch_enabled")
+            or not _last_device_status.get("indicator_on")
+            or status_age > 12
+        ):
+            raise HTTPException(status_code=403, detail="Camera permission or privacy confirmation expired during upload.")
+        _last_frame = {"request_id": request_id, "bytes": raw, "created_at": now}
+        _capture_request = None
+        return {"accepted": True, "request_id": request_id}
+    finally:
+        await file.close()
 
 
 async def capture_frame_for_question(question: str, live: bool = False) -> dict:
