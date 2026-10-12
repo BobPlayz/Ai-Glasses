@@ -22,6 +22,13 @@ def _is_telugu(text: str) -> bool:
     return any(0x0C00 <= ord(char) <= 0x0C7F for char in text)
 
 
+def _english_voice_key() -> str:
+    """Prefer the more conversational US Ryan voice, retaining Alan as a safe fallback."""
+    preferred = VOICE_DIR / "en_US-ryan-medium.onnx"
+    preferred_config = VOICE_DIR / "en_US-ryan-medium.onnx.json"
+    return "en_US-ryan-medium" if preferred.is_file() and preferred_config.is_file() else "en_GB-alan-medium"
+
+
 def _speak_with_piper(text: str, voice_key: str) -> dict | None:
     model_path = VOICE_DIR / f"{voice_key}.onnx"
     config_path = VOICE_DIR / f"{voice_key}.onnx.json"
@@ -101,7 +108,7 @@ def speak_local(text: str) -> dict:
         return {"spoken": False, "reason": "empty_text"}
 
     telugu = _is_telugu(text)
-    voice_key = "te_IN-venkatesh-medium" if telugu else "en_GB-alan-medium"
+    voice_key = "te_IN-venkatesh-medium" if telugu else _english_voice_key()
     result = _speak_with_piper(text, voice_key)
     if result:
         return result
@@ -134,7 +141,7 @@ def synthesize_wav_local(text: str, max_chars: int = 220) -> bytes | None:
     text = " ".join(text.strip().split())[:max(1, min(max_chars, 500))]
     if not text:
         return None
-    voice_key = "te_IN-venkatesh-medium" if _is_telugu(text) else "en_GB-alan-medium"
+    voice_key = "te_IN-venkatesh-medium" if _is_telugu(text) else _english_voice_key()
     model_path = VOICE_DIR / f"{voice_key}.onnx"
     config_path = VOICE_DIR / f"{voice_key}.onnx.json"
     if not model_path.is_file() or not config_path.is_file():
