@@ -4,7 +4,7 @@ AI Glasses stays **local-first**. Stable questions are answered by the local Oll
 
 ## What it does
 
-- Searches up to five public web results using DuckDuckGo's text-search interface.
+- Searches DuckDuckGo's news interface first, then falls back to text search. India-wide current-news questions trigger several targeted searches across general news, politics/government, and crime/public safety. Generic news homepages and boilerplate snippets are filtered out; results are deduplicated and limited to article-style URLs.
 - Passes titles, source domains, dates, snippets, and URLs to the local model as untrusted research context.
 - Shows the source URLs in the dashboard after the answer.
 - Keeps web search separate from camera and microphone data. Only the text of the current question is sent to the search provider; saved memories, conversation history, photos, and audio are not sent.
