@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import threading
 import tempfile
@@ -20,6 +21,8 @@ _synthesis_lock = threading.Lock()
 # Faster phoneme timing plus a small playback-rate lift gives JARVIS a
 # brisker, slightly brighter sound without changing the installed voice model.
 PIPER_LENGTH_SCALE = 0.88
+ONLINE_VOICE_MODE_PATH = ROOT / "data" / "voice-mode.json"
+ONLINE_VOICES = {"en": "en-US-AvaNeural", "te": "te-IN-ShrutiNeural"}
 PLAYBACK_RATE_MULTIPLIER = 1.05
 
 
@@ -45,6 +48,52 @@ def _tune_wav_bytes(audio: bytes) -> bytes:
             writer.setcomptype(params.comptype, params.compname)
             writer.writeframes(frames)
     return tuned.getvalue()
+
+
+
+def online_voice_enabled() -> bool:
+    try:
+        import json
+        data = json.loads(ONLINE_VOICE_MODE_PATH.read_text(encoding="utf-8"))
+        return isinstance(data, dict) and data.get("enabled") is True
+    except (OSError, ValueError):
+        return False
+
+
+def _synthesize_online_wav(text: str) -> bytes | None:
+    """Synthesize natural online neural speech and return PCM WAV bytes."""
+    try:
+        import edge_tts
+        import miniaudio
+
+        voice = ONLINE_VOICES["te" if _is_telugu(text) else "en"]
+
+        async def render() -> bytes:
+            communicate = edge_tts.Communicate(text[:1200], voice, rate="+4%", volume="+0%")
+            chunks = []
+            async for chunk in communicate.stream():
+                if chunk.get("type") == "audio":
+                    chunks.append(chunk["data"])
+            return b"".join(chunks)
+
+        mp3_data = asyncio.run(render())
+        if not mp3_data:
+            return None
+        decoded = miniaudio.decode(
+            mp3_data,
+            output_format=miniaudio.SampleFormat.SIGNED16,
+            nchannels=1,
+            sample_rate=24000,
+        )
+        output = io.BytesIO()
+        with wave.open(output, "wb") as wav:
+            wav.setnchannels(decoded.nchannels)
+            wav.setsampwidth(2)
+            wav.setframerate(decoded.sample_rate)
+            wav.writeframes(decoded.samples)
+        return output.getvalue()
+    except Exception:
+        return None
 
 
 def _speak_with_piper(text: str, voice_key: str) -> dict | None:
@@ -130,6 +179,24 @@ def speak_local(text: str) -> dict:
     if not text:
         return {"spoken": False, "reason": "empty_text"}
 
+    if online_voice_enabled():
+        audio = _synthesize_online_wav(text)
+        if audio:
+            try:
+                import winsound
+                with tempfile.NamedTemporaryFile(prefix="glasses-online-tts-", suffix=".wav", delete=False) as temp:
+                    output_path = Path(temp.name)
+                try:
+                    output_path.write_bytes(audio)
+                    winsound.PlaySound(str(output_path), winsound.SND_FILENAME)
+                finally:
+                    output_path.unlink(missing_ok=True)
+                language = "Telugu" if _is_telugu(text) else "English"
+                voice = ONLINE_VOICES["te" if _is_telugu(text) else "en"]
+                return {"spoken": True, "engine": "Microsoft neural TTS (online)", "voice": voice, "offline": False, "language": language}
+            except Exception:
+                pass
+
     telugu = _is_telugu(text)
     voice_key = "te_IN-venkatesh-medium" if telugu else "en_GB-alan-medium"
     result = _speak_with_piper(text, voice_key)
@@ -164,6 +231,8 @@ def synthesize_wav_local(text: str, max_chars: int = 220) -> bytes | None:
     text = " ".join(text.strip().split())[:max(1, min(max_chars, 500))]
     if not text:
         return None
+    if online_voice_enabled():
+        return _synthesize_online_wav(text)
     voice_key = "te_IN-venkatesh-medium" if _is_telugu(text) else "en_GB-alan-medium"
     model_path = VOICE_DIR / f"{voice_key}.onnx"
     config_path = VOICE_DIR / f"{voice_key}.onnx.json"
