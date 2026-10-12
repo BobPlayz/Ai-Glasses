@@ -59,6 +59,8 @@ class LocalVisionTests(unittest.TestCase):
         oversized = bytearray(png_bytes())
         oversized[16:20] = (5000).to_bytes(4, "big")
         oversized[20:24] = (5000).to_bytes(4, "big")
+        import zlib
+        oversized[29:33] = zlib.crc32(bytes(oversized[12:29])).to_bytes(4, "big")
         with patch("laptop.vision.local_vision.urllib.request.urlopen") as request:
             with self.assertRaisesRegex(VisionError, "20-megapixel"):
                 ask_image_local(bytes(oversized), "Describe this image.")
