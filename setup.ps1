@@ -44,10 +44,13 @@ New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot "data\temp") 
 # Generate local secrets once. These files are excluded from Git.
 $pinPath = Join-Path $PSScriptRoot ".dashboard-pin"
 if (-not (Test-Path $pinPath)) {
-    $pin = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 16 | ForEach-Object { [char]$_ })
+    $pinBytes = New-Object byte[] 18
+    $pinRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $pinRng.GetBytes($pinBytes) } finally { $pinRng.Dispose() }
+    $pin = [Convert]::ToBase64String($pinBytes).TrimEnd('=').Replace('+','-').Replace('/','_')
     Set-Content -Path $pinPath -Value $pin -NoNewline
-    Write-Host "Created local dashboard PIN: $pin" -ForegroundColor Yellow
-    Write-Host "Save it privately. It is not committed to Git." -ForegroundColor Yellow
+    Write-Host "Created a cryptographically random local dashboard PIN." -ForegroundColor Yellow
+    Write-Host "Read .dashboard-pin locally and keep it private; the PIN is not printed or committed." -ForegroundColor Yellow
 }
 $deviceTokenPath = Join-Path $PSScriptRoot ".device-token"
 if (-not (Test-Path $deviceTokenPath)) {

@@ -38,7 +38,114 @@ VOICE_MODE_PATH = DATA_DIR / "voice-mode.json"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
+class RequestSafetyMiddleware:
+    """Add baseline security headers and cap HTTP request bodies."""
+
+    def __init__(self, app, max_body_bytes: int = 22 * 1024 * 1024):
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    @staticmethod
+    async def _reject(send, status: int, message: str) -> None:
+        body = json.dumps({"detail": message}).encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json; charset=utf-8"),
+                (b"content-length", str(len(body)).encode("ascii")),
+                (b"cache-control", b"no-store"),
+                (b"x-content-type-options", b"nosniff"),
+                (b"x-frame-options", b"DENY"),
+                (b"referrer-policy", b"no-referrer"),
+                (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body, "more_body": False})
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        declared_length = headers.get(b"content-length")
+        if declared_length:
+            try:
+                if int(declared_length) > self.max_body_bytes:
+                    await self._reject(send, 413, "Request body exceeds the 22 MiB limit.")
+                    return
+            except ValueError:
+                await self._reject(send, 400, "Invalid Content-Length header.")
+                return
+
+        total_bytes = 0
+        exceeded = False
+        response_started = False
+        rejection_started = False
+        rejection_body_sent = False
+        rejection_body = b'{"detail":"Request body exceeds the 22 MiB limit."}'
+
+        async def limited_receive():
+            nonlocal total_bytes, exceeded
+            message = await receive()
+            if message.get("type") == "http.request" and not exceeded:
+                total_bytes += len(message.get("body", b""))
+                if total_bytes > self.max_body_bytes:
+                    exceeded = True
+                    return {"type": "http.request", "body": b"", "more_body": False}
+            return message
+
+        async def secured_send(message):
+            nonlocal response_started, rejection_started, rejection_body_sent
+            if exceeded:
+                if not response_started:
+                    response_started = True
+                    rejection_started = True
+                    await send({
+                        "type": "http.response.start",
+                        "status": 413,
+                        "headers": [
+                            (b"content-type", b"application/json; charset=utf-8"),
+                            (b"content-length", str(len(rejection_body)).encode("ascii")),
+                            (b"cache-control", b"no-store"),
+                            (b"x-content-type-options", b"nosniff"),
+                            (b"x-frame-options", b"DENY"),
+                            (b"referrer-policy", b"no-referrer"),
+                            (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+                        ],
+                    })
+                elif rejection_started and not rejection_body_sent and message.get("type") == "http.response.body":
+                    rejection_body_sent = True
+                    await send({"type": "http.response.body", "body": rejection_body, "more_body": False})
+                return
+
+            if message.get("type") == "http.response.start":
+                response_started = True
+                response_headers = list(message.get("headers", []))
+                existing = {name.lower() for name, _ in response_headers}
+                defaults = [
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"x-frame-options", b"DENY"),
+                    (b"referrer-policy", b"no-referrer"),
+                    (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+                    (b"cache-control", b"no-store"),
+                ]
+                response_headers.extend((name, value) for name, value in defaults if name not in existing)
+                message = {**message, "headers": response_headers}
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, secured_send)
+        except Exception:
+            if exceeded and not response_started:
+                await self._reject(send, 413, "Request body exceeds the 22 MiB limit.")
+            elif not exceeded:
+                raise
+
+
 app = FastAPI(title="AI Glasses Local Dashboard", version="0.2.0")
+app.add_middleware(RequestSafetyMiddleware, max_body_bytes=22 * 1024 * 1024)
 _capture_lock = asyncio.Lock()
 _capture_request: dict | None = None
 _last_device_status: dict = {"connected": False}
@@ -473,6 +580,8 @@ def speak(payload: MemoryInput) -> dict:
 
 @app.post("/api/vision", dependencies=[Depends(verify_dashboard_pin)])
 async def vision(question: str = "Describe the main objects and read visible text if possible.", file: UploadFile = File(...)) -> dict:
+    if len(question) > 500:
+        raise HTTPException(status_code=422, detail="Vision question must be 500 characters or fewer.")
     if file.content_type and file.content_type.lower() not in {"image/jpeg", "image/png", "image/webp", "image/bmp", "application/octet-stream"}:
         raise HTTPException(status_code=415, detail="Upload a JPEG, PNG, WebP, or BMP image.")
     raw = await file.read(8 * 1024 * 1024 + 1)
@@ -534,11 +643,17 @@ async def device_audio(request: Request) -> dict:
     global _voice_armed, _voice_last_event, _voice_question_parts
     if not _dashboard_microphone_enabled:
         raise HTTPException(status_code=403, detail="Device microphone is disabled in the dashboard.")
-    raw = await request.body()
+    max_audio_bytes = 2 * 1024 * 1024
+    audio_chunks: list[bytes] = []
+    audio_size = 0
+    async for chunk in request.stream():
+        audio_size += len(chunk)
+        if audio_size > max_audio_bytes:
+            raise HTTPException(status_code=413, detail="Audio chunk exceeds 2 MiB.")
+        audio_chunks.append(chunk)
+    raw = b"".join(audio_chunks)
     if not raw:
         raise HTTPException(status_code=400, detail="Audio chunk is empty.")
-    if len(raw) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Audio chunk exceeds 2 MiB.")
     if not raw.startswith(b"RIFF") or raw[8:12] != b"WAVE":
         raise HTTPException(status_code=415, detail="Device audio must be a WAV file.")
     path = TEMP_DIR / f"mic-{uuid4().hex}.wav"

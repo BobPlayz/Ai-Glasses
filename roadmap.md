@@ -43,7 +43,9 @@
 - [x] Device pairing token; optional PIN-protected LAN dashboard mode.
 - [x] Camera/microphone default-off permissions and revocation controls.
 - [x] Expiring capture requests, fresh status, physical-switch and indicator reports.
-- [x] Bounded uploads, JPEG signature checks, private-LAN camera URL validation, redirect blocking.
+- [x] Bounded request bodies, bounded device audio reads, JPEG signature checks, private-LAN camera URL validation, redirect blocking.
+- [x] Baseline security headers and 20-megapixel / single-frame image validation before OCR and inference.
+- [x] Cryptographically random dashboard PIN generation; no PIN printed during setup.
 - [x] Local vision rejects non-loopback Ollama hosts; runtime secrets/data ignored by Git.
 - [ ] Test expired requests, stale status, switch-off during capture, invalid uploads, and bad tokens.
 - [ ] Review logs and Git changes for secrets or captured media.
@@ -56,7 +58,7 @@
 - [x] Image resize/compression, bounded retry, actionable HTTP/timeout/invalid-JSON errors.
 - [x] Safe diagnostics without image payload logging; regression tests for retry and failure paths.
 - [x] Earlier direct Ollama generated-image baseline succeeded on the laptop.
-- [ ] Get current Python CI green after the JPEG check fix.
+- [ ] Get current Python CI green after request-body and image-validation hardening.
 - [ ] Test a generated image through the dashboard endpoint, then a real snapshot.
 **Exit check:** A real image returns a useful answer through Ai-Spects itself.
 
@@ -98,8 +100,8 @@
 **Exit check:** Software checks are green, hardware claims are physically tested, and demo/recovery steps are documented.
 
 ## Immediate priority order
-1. Fix and test the production JPEG signature check.
-2. Get the full Python suite green.
+1. Get Python tests and the new dependency audit green.
+2. Exercise request-size limits and malformed/pixel-bomb image rejection.
 3. Test vision through Ai-Spects, not only direct Ollama.
 4. Rehearse offline mode and record latency.
 5. Verify the exact board and safe power/audio path.

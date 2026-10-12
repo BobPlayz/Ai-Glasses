@@ -65,6 +65,25 @@ class DevicePrivacyApiTests(unittest.TestCase):
         self.assertFalse(response.json()["microphone_allowed"])
         self.assertIsNone(response.json()["capture"])
 
+    def test_large_device_audio_chunk_is_rejected_before_transcription(self):
+        glasses_app._dashboard_microphone_enabled = True
+        oversized = b"RIFF" + b"\x00" * (2 * 1024 * 1024 - 3) + b"WAVE"
+        with patch("laptop.app.transcribe_audio_file") as transcribe:
+            response = self.client.post(
+                "/api/device/audio",
+                headers={**self.headers, "Content-Type": "audio/wav"},
+                content=oversized,
+            )
+        self.assertEqual(response.status_code, 413)
+        transcribe.assert_not_called()
+
+    def test_responses_include_baseline_security_headers(self):
+        response = self.client.get("/api/status")
+        self.assertEqual(response.headers.get("x-content-type-options"), "nosniff")
+        self.assertEqual(response.headers.get("x-frame-options"), "DENY")
+        self.assertEqual(response.headers.get("referrer-policy"), "no-referrer")
+        self.assertEqual(response.headers.get("cache-control"), "no-store")
+
     def test_device_audio_is_rejected_until_microphone_opt_in(self):
         response = self.client.post(
             "/api/device/audio",

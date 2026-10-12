@@ -8,8 +8,12 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   test:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -20,6 +24,10 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+      - name: Audit resolved Python dependencies
+        run: |
+          python -m pip install pip-audit
+          python -m pip_audit -r requirements.txt
       - name: Compile Python
         run: python -m compileall -q laptop tests
       - name: Run unit tests

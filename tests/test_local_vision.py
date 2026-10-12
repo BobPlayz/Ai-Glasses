@@ -55,6 +55,21 @@ class LocalVisionTests(unittest.TestCase):
         self.assertTrue(result["offline"])
         self.assertEqual(request.call_count, 1)
 
+    def test_image_exceeding_pixel_limit_is_rejected_before_inference(self):
+        oversized = bytearray(png_bytes())
+        oversized[16:20] = (5000).to_bytes(4, "big")
+        oversized[20:24] = (5000).to_bytes(4, "big")
+        with patch("laptop.vision.local_vision.urllib.request.urlopen") as request:
+            with self.assertRaisesRegex(VisionError, "20-megapixel"):
+                ask_image_local(bytes(oversized), "Describe this image.")
+            request.assert_not_called()
+
+    def test_unsupported_svg_payload_is_rejected(self):
+        with patch("laptop.vision.local_vision.urllib.request.urlopen") as request:
+            with self.assertRaises(VisionError):
+                ask_image_local(b"<svg xmlns='http://www.w3.org/2000/svg'></svg>", "Describe this image.")
+            request.assert_not_called()
+
     def test_empty_first_answer_retries_and_succeeds(self):
         with patch(
             "laptop.vision.local_vision.urllib.request.urlopen",

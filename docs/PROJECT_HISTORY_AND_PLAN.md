@@ -59,7 +59,18 @@ Ai-Spects is a custom laptop-powered smart-glasses prototype. The laptop runs lo
 - Candidate I2S output uses GPIO4/5/6 for BCLK/WS/DATA, but physical amplifier/speaker operation is not confirmed.
 - Microphone pin map corrected in docs: GPIO42 is PDM clock and GPIO41 is PDM data.
 
-## 3. Recent reliability work and CI evidence
+## 3. Security hardening added on 12 October 2026
+
+- Added a request-body safety middleware with early Content-Length rejection and streamed byte counting; global cap is 22 MiB to allow bounded multipart uploads.
+- Device microphone reads now stop at 2 MiB rather than buffering a body first.
+- Added baseline security headers: no MIME sniffing, no framing, no referrer, browser camera/microphone/geolocation permissions disabled, and no-store caching.
+- Local vision validates actual image format, limits pixel dimensions to 20 megapixels, rejects multi-frame images, and validates before OCR or inference.
+- Dashboard PIN setup now uses cryptographic randomness and does not print the PIN to the setup console.
+- CI now requests read-only repository content permission and runs a Python dependency vulnerability audit.
+- Added regression tests for oversized microphone chunks, response headers, oversized image dimensions, and unsupported SVG content.
+- Research basis: OWASP File Upload Cheat Sheet, FastAPI middleware guidance, and GitHub Actions secure-use guidance. These controls reduce attack surface but do not make this prototype safe for public internet exposure.
+
+## 4. Recent reliability work and CI evidence
 
 ### Vision diagnostics
 Commit: https://github.com/BobPlayz/Ai-Glasses/commit/e2871ae667af2081e67861b59df07cfb5a76552c
@@ -83,7 +94,7 @@ Commit: https://github.com/BobPlayz/Ai-Glasses/commit/2e29e972729564e39359edd0cf
 - Earlier commit 2e29e97 had a passing Python test workflow.
 - Check the latest workflow after the production JPEG fix. Do not claim a green suite until GitHub reports success.
 
-## 4. Current status by evidence
+## 5. Current status by evidence
 
 ### Implemented in repository
 Local text model adapter, memory, dashboard, speech adapters, vision adapter, API privacy gates, device token/PIN checks, candidate firmware, and automated checks.
@@ -99,7 +110,7 @@ Ollama listed a local vision model and accepted one generated image through its 
 - Real board flashing, heartbeat/pairing, camera switch, visible indicator, microphone quality/revocation, and actual speaker playback.
 - Safe battery/charging setup, final mounting, and complete wearable operation.
 
-## 5. Security rules
+## 6. Security rules
 Read [SECURITY.md](SECURITY.md) before enabling LAN mode or handling camera/audio data.
 
 1. Keep the dashboard on localhost by default.
@@ -113,19 +124,19 @@ Read [SECURITY.md](SECURITY.md) before enabling LAN mode or handling camera/audi
 9. Do not connect a battery/charger until wiring and ratings are reviewed by a qualified adult/technician.
 10. Green CI means code checks passed, not that hardware is safe or functional.
 
-## 6. Next actions in order
-1. Close the JPEG regression: confirm corrected production check accepts valid JPEG bytes and rejects invalid ones.
-2. Get Python CI green; inspect full logs if any test fails.
-3. Test vision through Ai-Spects itself using the known small generated PNG, then test a real image and temporary phone route if needed.
-4. Run security/privacy regressions: tokens, disabled camera/mic, stale heartbeat, expired request, invalid uploads, redirects, and revocation.
-5. Finish laptop setup and confirm the documented command and required assets work.
-6. Rehearse offline: test text, memory, English/Telugu speech, transcription, OCR, and vision with internet disconnected.
-7. Confirm parts and board revision: pinout, amplifier labels, speaker impedance/power, cable type, and power module.
-8. Bench-test with supervision: USB first; check continuity, polarity, insulation, switch/indicator, camera, mic, and speaker.
-9. Run exhibition rehearsal and record real latency, fallback behavior, privacy demonstration, and limitations.
+## 7. Next actions in order
+1. Confirm Python tests, firmware compile, and dependency audit are green; inspect full logs if any check fails.
+2. Exercise request-size limits, JPEG validation, pixel-bomb rejection, security headers, tokens, disabled camera/mic, stale heartbeat, expired request, redirects, and revocation.
+3. Test vision through Ai-Spects itself using a generated PNG, then a real image and temporary phone route if needed.
+4. Finish laptop setup and confirm the documented command and required assets work.
+5. Rehearse offline: test text, memory, English/Telugu speech, transcription, OCR, and vision with internet disconnected.
+6. Confirm parts and board revision: pinout, amplifier labels, speaker impedance/power, cable type, and power module.
+7. Bench-test with supervision: USB first; check continuity, polarity, insulation, switch/indicator, camera, mic, and speaker.
+8. Run exhibition rehearsal and record real latency, fallback behavior, privacy demonstration, and limitations.
+9. Review secret exposure risk and confirm runtime files remain ignored by Git.
 10. After core stability, consider BobAI integration and any display as separate future work.
 
-## 7. Exhibition acceptance checklist
+## 8. Exhibition acceptance checklist
 - [ ] Documented setup launches the dashboard.
 - [ ] Current Python tests and firmware build checks pass.
 - [ ] Text AI answers locally with internet disconnected.
@@ -141,7 +152,7 @@ Read [SECURITY.md](SECURITY.md) before enabling LAN mode or handling camera/audi
 - [ ] Offline rehearsal is repeatable.
 - [ ] Presentation separates tested behavior from planned features.
 
-## 8. Documentation map
+## 9. Documentation map
 - [roadmap.md](../roadmap.md): short ten-phase execution checklist.
 - [SECURITY.md](SECURITY.md): security boundaries and privacy test checklist.
 - [AI_SPECTS_INTEGRATION_STATUS.md](AI_SPECTS_INTEGRATION_STATUS.md): hardware/software integration status.

@@ -4,7 +4,7 @@
 **Review date:** 12 October 2026  
 **Scope:** Local laptop dashboard, paired ESP32 device, camera/microphone uploads, local vision, and optional private-LAN access.
 
-This is a prototype security guide, not a professional penetration-test report.
+This is a prototype security guide, not a professional penetration-test report. References: [OWASP File Upload Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html), [FastAPI middleware guidance](https://fastapi.tiangolo.com/advanced/middleware/), and [GitHub Actions secure-use reference](https://docs.github.com/en/actions/reference/security/secure-use).
 
 ## Protections implemented in code
 - Device routes verify a locally stored pairing token using constant-time comparison.
@@ -12,12 +12,16 @@ This is a prototype security guide, not a professional penetration-test report.
 - Dashboard camera and device microphone permissions default off.
 - Camera capture requires an active, unexpired request, dashboard permission, recent device status, camera-enabled status, physical-switch report, and indicator report.
 - Server rechecks key privacy signals after upload finishes.
+- All HTTP request bodies are capped at 22 MiB, with declared lengths rejected before parsing and streamed bodies counted as they arrive. The paired-device audio route independently reads at most 2 MiB.
 - Glasses camera upload is limited to 8 MiB and requires a JPEG signature.
 - Firmware limits an individual frame and checks its physical switch before upload.
 - Device audio upload is blocked unless microphone permission is enabled; audio size is limited and temporary files are deleted in a cleanup path.
 - Phone-camera input is restricted to private-LAN IP addresses and expected snapshot paths, with size and content-signature checks.
 - Phone-camera and optional MJPEG fetches use no-redirect helpers.
 - Local vision rejects a non-loopback Ollama host.
+- Image processing validates the decoded format, rejects animated/multi-frame images, limits images to 20 megapixels, and validates before OCR/model inference.
+- Responses receive `nosniff`, anti-framing, no-referrer, restricted browser camera/microphone/geolocation permissions, and `no-store` headers.
+- Dashboard PINs are generated using a cryptographic random-number generator and are not printed during setup.
 - Runtime data, recordings, captures, models, local credentials, and virtual environments are ignored by Git.
 - Vision diagnostics should contain operational metadata only, never image payload/base64.
 
@@ -44,10 +48,12 @@ This is a prototype security guide, not a professional penetration-test report.
 - [ ] Camera upload is rejected without an active request.
 - [ ] Expired capture requests are rejected.
 - [ ] Stale heartbeat, camera-disabled state, switch-off, or indicator-off blocks capture.
-- [ ] Invalid JPEG signatures and oversized images are rejected.
+- [ ] Invalid JPEG signatures, oversized images, oversized request bodies, animated images, and images exceeding 20 megapixels are rejected.
 - [ ] Permission revocation during upload/capture prevents acceptance or analysis.
 - [ ] Public IPs, hostnames, unexpected camera paths, and redirects are rejected.
 - [ ] Remote Ollama host is rejected.
+- [ ] Security response headers are present on success and error responses.
+- [ ] Dependency audit passes and workflow permissions remain read-only.
 - [ ] Test logs and Git diff contain no credentials or image payloads.
 
 ## Known limits

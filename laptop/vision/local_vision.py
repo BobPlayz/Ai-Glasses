@@ -133,21 +133,34 @@ def ask_image_local(image_bytes: bytes, question: str) -> dict:
     if len(image_bytes) > 8 * 1024 * 1024:
         raise VisionError("Image is larger than the 8 MB safety limit.")
     question = question.strip() or "Describe the main visible objects and any readable text."
-    ocr_text = extract_text_local(image_bytes)
+    if len(question) > 500:
+        raise VisionError("Vision question must be 500 characters or fewer.")
 
-    # Phone cameras often send 12 MP+ frames. Keep OCR on the original image,
-    # but give the vision model a bounded JPEG to reduce CPU time and memory use.
+    # Decode and validate before OCR. Signatures alone are insufficient: reject
+    # unsupported formats, multi-frame files, and pixel bombs before inference.
     try:
         from PIL import Image
 
         with Image.open(io.BytesIO(image_bytes)) as source:
+            if source.format not in {"JPEG", "PNG", "WEBP", "BMP"}:
+                raise VisionError("Only JPEG, PNG, WebP, and BMP images are supported.")
+            if source.width < 1 or source.height < 1 or source.width * source.height > 20_000_000:
+                raise VisionError("Image dimensions exceed the 20-megapixel safety limit.")
+            if getattr(source, "n_frames", 1) != 1:
+                raise VisionError("Animated or multi-frame images are not supported.")
+            source.load()
             image = source.convert("RGB")
             image.thumbnail((1280, 1280))
             optimized = io.BytesIO()
             image.save(optimized, format="JPEG", quality=85, optimize=True)
             vision_image_bytes = optimized.getvalue()
+    except VisionError:
+        raise
     except Exception as exc:
-        raise VisionError("Could not decode the captured image. Try another phone snapshot.") from exc
+        raise VisionError("Could not safely decode the captured image. Try a standard JPEG or PNG snapshot.") from exc
+
+    # OCR runs only after the image has passed the byte, format, and pixel limits.
+    ocr_text = extract_text_local(image_bytes)
 
     host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
     from urllib.parse import urlsplit
