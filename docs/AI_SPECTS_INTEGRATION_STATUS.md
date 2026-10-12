@@ -22,7 +22,7 @@ This document separates what the repository already does from what still needs h
 
 ## Current software behavior
 
-- The laptop app already supports local Ollama text inference, local image description, English/Telugu OCR, offline speech synthesis, a browser dashboard, device pairing, and privacy-gated XIAO JPEG snapshot uploads.
+- The laptop app already supports local Ollama text inference, local image description, English/Telugu OCR, online neural speech by default with offline fallback, a browser dashboard, device pairing, and privacy-gated XIAO JPEG snapshot uploads.
 - The XIAO firmware currently uploads short WAV microphone chunks only when dashboard microphone permission is enabled.
 - Visual questions request a single JPEG snapshot through the device command queue. The current XIAO firmware is **not** a continuous video streamer.
 - Speech responses currently play through the laptop's audio output. The MAX98357 + woofer are **not yet wired into the response path**.
@@ -52,8 +52,8 @@ Live vision uses sequential one-shot frames and local inference, rather than cla
 
 ## Local glasses-speaker path
 
-- Typed assistant answers, manual offline speech, and paired-microphone answers can enqueue short offline Piper WAV audio for the paired device.
-- The authenticated device polls for a queued WAV. The server bounds audio to 900,000 bytes and expires the queue after 30 seconds. If Piper assets are unavailable, the laptop-output path remains available and no glasses audio is queued.
+- Typed assistant answers, manual speech, and paired-microphone answers can enqueue short WAV audio for the paired device. With online voice enabled, synthesis sends spoken text to the online speech provider; turning it off selects local Piper fallback.
+- The authenticated device polls for a queued WAV. The server bounds audio to 900,000 bytes and expires the queue after 30 seconds. If speech synthesis fails, laptop text remains available and no glasses audio is queued.
 - Candidate I2S output uses GPIO4 (BCLK), GPIO5 (LRCLK/WS), and GPIO6 (DATA), corresponding to XIAO D3/D4/D5. The onboard PDM microphone remains on GPIO41/42 using I2S_NUM_0. Confirm the exact board revision and amplifier breakout labels before wiring.
 - The MAX98357 I2S amplifier needs a suitable speaker load and documented supply. Confirm the selected 2-inch woofer's impedance and power rating from its actual label/listing before power-up. Never connect the amplifier's bridged speaker outputs to ground or to a board GPIO.
 - The physical speaker, wiring, exact component compatibility, firmware upload, audio quality, and battery/power path remain unverified until parts are available and bench-tested with an experienced adult/technician.
@@ -61,6 +61,6 @@ Live vision uses sequential one-shot frames and local inference, rather than cla
 
 ## Streaming voice responses
 
-The dashboard now consumes a token stream from local Ollama. It updates the answer text as tokens arrive and synthesizes completed sentences, with a word-boundary fallback for long sentences, while generation continues. This reduces the wait for first audio without chopping every comma into a separate clip. Each generated WAV is played on the laptop and also placed in a bounded FIFO queue for the paired glasses speaker. Speech is phrase-level rather than word-by-word so prosody can stay coherent.
+The dashboard consumes a token stream from local Ollama. It updates answer text as tokens arrive and synthesizes completed sentences, with a word-boundary fallback for long sentences, while generation continues. This reduces the wait for first audio without chopping every comma into a separate clip. Each generated WAV is played on the laptop and also placed in a bounded FIFO queue for the paired glasses speaker. Speech is phrase-level rather than word-by-word so prosody can stay coherent.
 
-English uses the original Piper `en_GB-alan-medium` voice. Before each answer stream, the dashboard warms the local voice model, then schedules synthesized phrase audio continuously in the browser while generated WAVs are queued for the glasses speaker. Install the offline voices with `scripts\\install_british_voice.ps1`. If the Piper model files are missing, the streaming voice endpoint reports the missing local voice instead of silently claiming that speech worked. The legacy one-shot response endpoint remains available.
+Online neural speech is enabled by default on a fresh setup; the dashboard warms the selected voice, schedules phrase audio in the browser, and queues generated WAVs for the glasses speaker. Disable online speech to use the cached Piper `en_GB-alan-medium` English and `te_IN-venkatesh-medium` Telugu voices. Install offline voices with `scripts\\install_british_voice.ps1`. Spoken text is sent to the online speech provider while online mode is enabled. If the Piper model files are missing, the streaming voice endpoint reports the missing local voice instead of silently claiming that speech worked. The legacy one-shot response endpoint remains available.
