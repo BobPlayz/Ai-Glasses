@@ -15,6 +15,7 @@ import urllib.request
 from collections.abc import Callable, Iterator
 from urllib.parse import urlsplit
 
+from laptop.vision.lan_http import open_no_redirect
 from laptop.vision.local_vision import VisionError, ask_image_local
 
 MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -51,7 +52,7 @@ def iter_mjpeg_frames(url: str, *, timeout: float = 8.0) -> Iterator[bytes]:
                  "User-Agent": DEFAULT_USER_AGENT},
     )
     try:
-        response = urllib.request.urlopen(request, timeout=timeout)
+        response = open_no_redirect(request, timeout=timeout)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise VisionError(f"Could not connect to the local camera stream: {exc}") from exc
 

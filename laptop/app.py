@@ -495,7 +495,8 @@ async def analyze_phone_camera(payload: PhoneCameraInput) -> dict:
     from ipaddress import ip_address
     from urllib.error import HTTPError, URLError
     from urllib.parse import urlparse
-    from urllib.request import Request, urlopen
+    from urllib.request import Request
+    from laptop.vision.lan_http import open_no_redirect
 
     parsed = urlparse(payload.snapshot_url.strip())
     if parsed.scheme != "http" or not parsed.hostname or parsed.username or parsed.password:
@@ -512,7 +513,7 @@ async def analyze_phone_camera(payload: PhoneCameraInput) -> dict:
         raise HTTPException(status_code=422, detail="Use the IP Webcam still-image URL ending in /shot.jpg.")
     request = Request(payload.snapshot_url.strip(), headers={"User-Agent": "Ai-Glasses-Local/1.0", "Accept": "image/jpeg,image/png"})
     try:
-        with urlopen(request, timeout=4) as response:
+        with open_no_redirect(request, timeout=4) as response:
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
             raw = response.read(8 * 1024 * 1024 + 1)
     except (HTTPError, URLError, TimeoutError, OSError) as exc:
