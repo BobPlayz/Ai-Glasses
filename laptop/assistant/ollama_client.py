@@ -152,6 +152,13 @@ def stream_local(
         "Relevant user-approved local memory notes:\\n"
         + (memory_lines or "(no relevant saved notes)")
     )
+    if gen_z_mode:
+        system += (
+            "\n\nSTYLE MODE: Gen Z casual. Sound naturally confident and conversational, not corporate or robotic. "
+            "Use contractions, everyday wording, short punchy sentences, and light current slang only when it fits. "
+            "Never force slang, overuse memes, or say 'bro' in every reply. Keep serious, safety, and factual answers accurate and responsible. "
+            "This changes wording, not facts."
+        )
     if web_context:
         system += "\n\n" + web_context[:6000]
     messages = [
@@ -218,12 +225,3 @@ def stream_local(
             except OllamaError:
                 pass
         raise primary_error
-    if gen_z_mode:
-        system += (
-            "\\n\\nSTYLE MODE: Gen Z casual. Sound like a naturally confident young adult chatting, not a corporate assistant. "
-            "Use contractions, everyday wording, short punchy sentences, and light current slang only when it fits. "
-            "Never force slang, overuse memes, say 'bro' in every reply, or sacrifice accuracy and respect. "
-            "Keep serious, medical, safety, and factual answers clear and responsible. This changes wording, not facts."
-        )
-    if web_context:
-        system += "\\n\\n" + web_context[:6000]
