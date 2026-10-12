@@ -60,5 +60,25 @@ class DeviceSpeechQueueTests(unittest.TestCase):
             self.assertFalse(queue)
 
 
+
+class VoiceModeApiTests(unittest.TestCase):
+    def test_voice_mode_api_reads_default_and_persists_user_choice(self):
+        from fastapi.testclient import TestClient
+        from laptop import app as app_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "voice-mode.json"
+            with patch.object(app_module, "VOICE_MODE_PATH", path), patch.object(speak, "ONLINE_VOICE_MODE_PATH", path), patch.dict("os.environ", {"GLASSES_LAN_MODE": "0"}):
+                client = TestClient(app_module.app)
+                initial = client.get("/api/voice-mode")
+                self.assertEqual(initial.status_code, 200)
+                self.assertTrue(initial.json()["online_voice"])
+
+                saved = client.post("/api/voice-mode", json={"enabled": False})
+                self.assertEqual(saved.status_code, 200)
+                self.assertFalse(saved.json()["online_voice"])
+                self.assertFalse(speak.online_voice_enabled())
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"enabled": False})
+
 if __name__ == "__main__":
     unittest.main()
